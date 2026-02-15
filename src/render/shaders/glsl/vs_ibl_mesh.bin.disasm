@@ -1,0 +1,23 @@
+attribute vec3 a_normal;
+attribute vec3 a_position;
+varying vec3 v_normal;
+varying vec3 v_view;
+uniform mat4 u_modelViewProj;
+uniform mat4 u_model[1];
+uniform vec4 u_params[12];
+void main ()
+{
+  vec4 tmpvar_1;
+  tmpvar_1.w = 1.0;
+  tmpvar_1.xyz = a_position;
+  gl_Position = (u_modelViewProj * tmpvar_1);
+  vec4 tmpvar_2;
+  tmpvar_2.w = 1.0;
+  tmpvar_2.xyz = a_position;
+  v_view = (u_params[7].xyz - (u_model[0] * tmpvar_2).xyz);
+  vec4 tmpvar_3;
+  tmpvar_3.w = 0.0;
+  tmpvar_3.xyz = ((a_normal * 2.0) - 1.0);
+  v_normal = (u_model[0] * tmpvar_3).xyz;
+}
+

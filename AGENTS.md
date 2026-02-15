@@ -25,7 +25,15 @@ This file defines how agents should behave in this repository.
 - Follow the latest MISRA C++ guidelines.
 
 ## Code Change Rules
+- Treat user removals as intentional: do not re-add code, config, docs, steps, or text that the user removed unless the user explicitly asks for that reintroduction in the current turn.
 - Change only what the user asked to change.
 - Keep edits minimal and focused.
 - Do not add extra helper functions unless required for the requested change.
 - Inspect surrounding code before making edits.
+
+## High level goals
+This project aims to replace some of the hammer source editors functionality. They key parts are:
+1. Ease of use
+2. Level conversion into a .vmf hammer file
+3. Vertex based geometry
+4. Cross platform natively (native linux, wsl, and windows)

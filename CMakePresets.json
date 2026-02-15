@@ -1,0 +1,65 @@
+{
+  "version": 5,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 24,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "carve-release",
+      "displayName": "Carve Release",
+      "description": "Configure using Conan-generated toolchain and dependencies.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/conan-release",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/conan-release/conan_toolchain.cmake",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "carve-debug",
+      "displayName": "Carve Debug",
+      "description": "Configure using Conan-generated toolchain and dependencies.",
+      "generator": "Unix Makefiles",
+      "binaryDir": "${sourceDir}/build/conan-debug",
+      "cacheVariables": {
+        "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/build/conan-debug/conan_toolchain.cmake",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "carve-debug-tidy",
+      "displayName": "Carve Debug + clang-tidy",
+      "description": "Configure Debug build with clang-tidy enabled.",
+      "inherits": "carve-debug",
+      "cacheVariables": {
+        "CARVE_ENABLE_CLANG_TIDY": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "build-carve-release",
+      "displayName": "Build Carve Release",
+      "configurePreset": "carve-release",
+      "configuration": "Release"
+    },
+    {
+      "name": "build-carve-debug",
+      "displayName": "Build Carve Debug",
+      "configurePreset": "carve-debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "build-carve-debug-tidy",
+      "displayName": "Build Carve Debug + clang-tidy",
+      "configurePreset": "carve-debug-tidy",
+      "configuration": "Debug"
+    }
+  ]
+}

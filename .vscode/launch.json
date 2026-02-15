@@ -1,0 +1,34 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run carve (Conan env)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "bash -lc 'exec \"${workspaceFolder}/scripts/run-carve-release.sh\" \"${workspaceFolder}/build/conan-release/carve\"'",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Debug carve (Conan env, WSL)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "/bin/bash",
+      "args": [
+        "-lc",
+        "exec \"${workspaceFolder}/scripts/run-carve-release.sh\" \"${workspaceFolder}/build/conan-release/carve\""
+      ],
+      "cwd": "${workspaceFolder}",
+      "externalConsole": false,
+      "stopAtEntry": false,
+      "MIMode": "gdb",
+      "miDebuggerPath": "/usr/bin/gdb",
+      "setupCommands": [
+        {
+          "description": "Enable gdb pretty printing",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}

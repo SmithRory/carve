@@ -1,0 +1,23 @@
+# Build directories
+/build/
+
+# CMake generated files
+/CMakeUserPresets.json
+/CMakeCache.txt
+/CMakeFiles/
+/cmake_install.cmake
+/Makefile
+/compile_commands.json
+
+# Conan generated files
+/conan.lock
+/conanbuild.sh
+/conanbuild.bat
+/conanrun.sh
+/conanrun.bat
+/graph.html
+
+# Editor/IDE local settings
+/.idea/
+/.cache/
+/.vscode/

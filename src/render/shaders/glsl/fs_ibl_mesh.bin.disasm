@@ -1,0 +1,115 @@
+varying vec3 v_normal;
+varying vec3 v_view;
+uniform vec4 u_params[12];
+uniform samplerCube s_texCube;
+uniform samplerCube s_texCubeIrr;
+void main ()
+{
+  vec3 refl_1;
+  vec3 tmpvar_2;
+  tmpvar_2 = normalize(u_params[10].xyz);
+  vec3 tmpvar_3;
+  tmpvar_3 = u_params[11].xyz;
+  vec3 tmpvar_4;
+  tmpvar_4 = normalize(v_normal);
+  vec3 tmpvar_5;
+  tmpvar_5 = normalize(v_view);
+  vec3 tmpvar_6;
+  tmpvar_6 = normalize((tmpvar_5 + tmpvar_2));
+  float tmpvar_7;
+  tmpvar_7 = clamp (dot (tmpvar_4, tmpvar_5), 0.0, 1.0);
+  float tmpvar_8;
+  tmpvar_8 = clamp (dot (tmpvar_4, tmpvar_2), 0.0, 1.0);
+  float tmpvar_9;
+  tmpvar_9 = clamp (dot (tmpvar_4, tmpvar_6), 0.0, 1.0);
+  float tmpvar_10;
+  tmpvar_10 = clamp (dot (tmpvar_6, tmpvar_5), 0.0, 1.0);
+  vec3 tmpvar_11;
+  tmpvar_11 = u_params[8].xyz;
+  float tmpvar_12;
+  tmpvar_12 = u_params[4].y;
+  float tmpvar_13;
+  tmpvar_13 = u_params[4].x;
+  if ((0.0 == u_params[5].x)) {
+    refl_1 = mix (vec3(0.04, 0.04, 0.04), tmpvar_11, tmpvar_12);
+  } else {
+    refl_1 = (u_params[9].xyz * vec3(tmpvar_12));
+  };
+  vec3 tmpvar_14;
+  tmpvar_14 = (tmpvar_11 * (1.0 - tmpvar_12));
+  vec3 tmpvar_15;
+  tmpvar_15 = (refl_1 + ((
+    (1.0 - refl_1)
+   * 
+    pow ((1.0 - tmpvar_10), 5.0)
+  ) * tmpvar_13));
+  vec3 tmpvar_16;
+  tmpvar_16 = (refl_1 + ((
+    (1.0 - refl_1)
+   * 
+    pow ((1.0 - tmpvar_7), 5.0)
+  ) * tmpvar_13));
+  float tmpvar_17;
+  tmpvar_17 = exp2(((10.0 * tmpvar_13) + 2.0));
+  vec3 tmpvar_18;
+  tmpvar_18 = (((u_params[6].x * 
+    ((tmpvar_14 * (1.0 - tmpvar_15)) * tmpvar_8)
+  ) + (u_params[6].y * 
+    (tmpvar_15 * ((pow (tmpvar_9, tmpvar_17) * tmpvar_8) * ((tmpvar_17 + 8.0) * 0.125)))
+  )) * tmpvar_3);
+  float tmpvar_19;
+  tmpvar_19 = (1.0 + (5.0 * (1.0 - tmpvar_13)));
+  mat4 tmpvar_20;
+  tmpvar_20[0] = u_params[0];
+  tmpvar_20[1] = u_params[1];
+  tmpvar_20[2] = u_params[2];
+  tmpvar_20[3] = u_params[3];
+  vec4 tmpvar_21;
+  tmpvar_21.w = 0.0;
+  tmpvar_21.xyz = (((2.0 * tmpvar_7) * tmpvar_4) - tmpvar_5);
+  vec3 tmpvar_22;
+  tmpvar_22 = normalize((tmpvar_20 * tmpvar_21).xyz);
+  vec4 tmpvar_23;
+  tmpvar_23.w = 0.0;
+  tmpvar_23.xyz = tmpvar_4;
+  vec3 tmpvar_24;
+  tmpvar_24 = normalize((tmpvar_20 * tmpvar_23).xyz);
+  vec3 _v_25;
+  _v_25 = tmpvar_22;
+  float tmpvar_26;
+  tmpvar_26 = abs(tmpvar_22.x);
+  float tmpvar_27;
+  tmpvar_27 = abs(tmpvar_22.y);
+  float tmpvar_28;
+  tmpvar_28 = abs(tmpvar_22.z);
+  float tmpvar_29;
+  tmpvar_29 = max (max (tmpvar_26, tmpvar_27), tmpvar_28);
+  float tmpvar_30;
+  tmpvar_30 = (1.0 - (exp2(tmpvar_19) / 256.0));
+  if ((tmpvar_26 != tmpvar_29)) {
+    _v_25.x = (tmpvar_22.x * tmpvar_30);
+  };
+  if ((tmpvar_27 != tmpvar_29)) {
+    _v_25.y = (tmpvar_22.y * tmpvar_30);
+  };
+  if ((tmpvar_28 != tmpvar_29)) {
+    _v_25.z = (tmpvar_22.z * tmpvar_30);
+  };
+  vec3 tmpvar_31;
+  tmpvar_31 = max (vec3(0.0, 0.0, 0.0), ((
+    (tmpvar_18 + (((tmpvar_14 * 
+      pow (abs(textureCube (s_texCubeIrr, tmpvar_24).xyz), vec3(2.2, 2.2, 2.2))
+    ) * u_params[6].z) + ((tmpvar_16 * 
+      pow (abs(textureCubeLod (s_texCube, _v_25, tmpvar_19).xyz), vec3(2.2, 2.2, 2.2))
+    ) * u_params[6].w)))
+   * 
+    exp2(u_params[4].z)
+  ) - 0.004));
+  gl_FragColor.xyz = ((tmpvar_31 * (
+    (6.2 * tmpvar_31)
+   + 0.5)) / ((tmpvar_31 * 
+    ((6.2 * tmpvar_31) + 1.7)
+  ) + 0.06));
+  gl_FragColor.w = 1.0;
+}
+
