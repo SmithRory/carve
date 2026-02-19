@@ -1,8 +1,14 @@
 #include <QApplication>
 #include <QThread>
 
-#include "ui/main_window.h"
+#include "ui/MainWindow.h"
 
+/**
+ * Application entry point.
+ * @param[in] argc Argument count from the host process.
+ * @param[in] argv Argument vector from the host process.
+ * @return Process exit code.
+ */
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);

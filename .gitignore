@@ -21,3 +21,6 @@
 /.idea/
 /.cache/
 /.vscode/
+
+# Clang analyzer output reports generated in repo root
+/*.plist

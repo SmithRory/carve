@@ -12,3 +12,4 @@ BreakBeforeBraces: Allman
 BreakBeforeBinaryOperators: NonAssignment
 Cpp11BracedListStyle: false
 LambdaBodyIndentation: OuterScope
+AccessModifierOffset: -4

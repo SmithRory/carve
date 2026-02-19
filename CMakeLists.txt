@@ -2,6 +2,9 @@ cmake_minimum_required(VERSION 3.24)
 
 project(carve LANGUAGES CXX)
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
+include(CarveCompileOptions)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -41,24 +44,24 @@ endif()
 
 set(CARVE_SOURCES
     src/main.cpp
-    src/scene/scene_core.cpp
-    src/scene/scene_core.h
-    src/render/render_bridge.cpp
-    src/render/render_bridge.h
-    src/ui/bgfx_view_widget.cpp
-    src/ui/bgfx_view_widget.h
-    src/ui/main_window.cpp
-    src/ui/main_window.h
+    src/scene/SceneCore.cpp
+    src/scene/SceneCore.h
+    src/render/RenderBridge.cpp
+    src/render/RenderBridge.h
+    src/ui/BgfxViewWidget.cpp
+    src/ui/BgfxViewWidget.h
+    src/ui/MainWindow.cpp
+    src/ui/MainWindow.h
 )
 
 add_executable(carve ${CARVE_SOURCES})
 
 set(CARVE_TIDY_SOURCES
     src/main.cpp
-    src/scene/scene_core.cpp
-    src/render/render_bridge.cpp
-    src/ui/bgfx_view_widget.cpp
-    src/ui/main_window.cpp
+    src/scene/SceneCore.cpp
+    src/render/RenderBridge.cpp
+    src/ui/BgfxViewWidget.cpp
+    src/ui/MainWindow.cpp
 )
 
 target_include_directories(carve
