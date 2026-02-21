@@ -1,3 +1,4 @@
+varying vec4 v_color0;
 varying vec3 v_normal;
 varying vec3 v_view;
 uniform vec4 u_params[12];
@@ -25,7 +26,7 @@ void main ()
   float tmpvar_10;
   tmpvar_10 = clamp (dot (tmpvar_6, tmpvar_5), 0.0, 1.0);
   vec3 tmpvar_11;
-  tmpvar_11 = u_params[8].xyz;
+  tmpvar_11 = (u_params[8].xyz * v_color0.xyz);
   float tmpvar_12;
   tmpvar_12 = u_params[4].y;
   float tmpvar_13;

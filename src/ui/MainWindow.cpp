@@ -23,5 +23,5 @@ MainWindow::MainWindow(QThread* buildThread, QWidget* parent)
     setWindowTitle("Carve");
     resize(INITIAL_WINDOW_WIDTH, INITIAL_WINDOW_HEIGHT);
     setCentralWidget(mViewWidget);
-    statusBar()->showMessage("Controls: Left-drag edits cube height (build mesh). Space + left-drag looks. WASD + Q/E move camera.");
+    statusBar()->showMessage("Shift+A add cube | LMB select object/component | Ctrl+LMB additive component select | X delete | Ctrl+Z undo | Ctrl+Shift+Z redo | Space+LMB look | WASD move");
 }

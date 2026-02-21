@@ -52,10 +52,13 @@ constexpr uint16_t DYNAMIC_VERTEX_GROWTH_FACTOR = 2U;
 constexpr uint16_t DYNAMIC_INDEX_GROWTH_FACTOR = 2U;
 constexpr uint32_t MINIMUM_VERTEX_CAPACITY = 8U;
 constexpr uint32_t MINIMUM_INDEX_CAPACITY = 36U;
+constexpr uint32_t MINIMUM_SELECTION_OVERLAY_VERTEX_CAPACITY = 8U;
+constexpr uint32_t MINIMUM_SELECTION_OVERLAY_EDGE_INDEX_CAPACITY = 24U;
 constexpr uint16_t ROOT_SEARCH_CAPACITY = 5U;
 constexpr std::int64_t EMPTY_FILE_SIZE = 0;
 constexpr bool DESTROY_SHADERS_ON_PROGRAM_DESTROY = true;
 constexpr float VIEW_CLEAR_DEPTH = 1.0F;
+constexpr uint32_t RESET_FLAGS = BGFX_RESET_VSYNC | BGFX_RESET_MSAA_X4;
 
 constexpr uint8_t RADIANCE_FALLBACK_RED = 166U;
 constexpr uint8_t RADIANCE_FALLBACK_GREEN = 181U;
@@ -66,9 +69,6 @@ constexpr uint8_t IRRADIANCE_FALLBACK_GREEN = 94U;
 constexpr uint8_t IRRADIANCE_FALLBACK_BLUE = 112U;
 
 constexpr uint32_t CLEAR_COLOR_READY = 0x26313dffU;
-constexpr uint32_t CLEAR_COLOR_BUILDING = 0x3d2b26ffU;
-constexpr uint32_t CLEAR_COLOR_READY_SELECTED = 0x203b48ffU;
-constexpr uint32_t CLEAR_COLOR_BUILDING_SELECTED = 0x483020ffU;
 
 using IBL_PARAM_VEC4 = std::array<float, 4>;
 constexpr IBL_PARAM_VEC4 IBL_PARAM_ZERO{ 0.0F, 0.0F, 0.0F, 0.0F };
@@ -200,8 +200,8 @@ bgfx::ProgramHandle loadProgram(std::string_view vsName, std::string_view fsName
     }
 
     const std::array<std::filesystem::path, SHADER_ROOT_COUNT> roots = {
-        std::filesystem::path("shaders") / std::filesystem::path(shaderDir),
         std::filesystem::path("src/render/shaders") / std::filesystem::path(shaderDir),
+        std::filesystem::path("shaders") / std::filesystem::path(shaderDir),
         std::filesystem::path(CARVE_SOURCE_DIR) / "src/render/shaders" / std::filesystem::path(shaderDir),
     };
 
@@ -326,7 +326,7 @@ void RenderBridge::initialize(void *nativeWindowHandle, uint32_t width, uint32_t
     init.type = bgfx::RendererType::Count;
     init.resolution.width = width;
     init.resolution.height = height;
-    init.resolution.reset = BGFX_RESET_VSYNC;
+    init.resolution.reset = RESET_FLAGS;
 
     bgfx::PlatformData platformData{};
     platformData.nwh = nativeWindowHandle;
@@ -349,6 +349,7 @@ void RenderBridge::initialize(void *nativeWindowHandle, uint32_t width, uint32_t
         .end();
 
     mProgramViewport = loadProgram("vs_ibl_mesh.bin", "fs_ibl_mesh.bin");
+    mProgramSelectionOverlay = loadProgram("vs_selection_overlay.bin", "fs_selection_overlay.bin");
     mUniformParams = bgfx::createUniform("u_params", bgfx::UniformType::Vec4, IBL_PARAM_COUNT);
     mSamplerRadiance = bgfx::createUniform("s_texCube", bgfx::UniformType::Sampler);
     mSamplerIrradiance = bgfx::createUniform("s_texCubeIrr", bgfx::UniformType::Sampler);
@@ -372,6 +373,7 @@ void RenderBridge::initialize(void *nativeWindowHandle, uint32_t width, uint32_t
     }
 
     if (!bgfx::isValid(mProgramViewport)
+        || !bgfx::isValid(mProgramSelectionOverlay)
         || !bgfx::isValid(mUniformParams)
         || !bgfx::isValid(mSamplerRadiance)
         || !bgfx::isValid(mSamplerIrradiance)
@@ -419,6 +421,10 @@ void RenderBridge::shutdown()
     {
         bgfx::destroy(mProgramViewport);
     }
+    if (bgfx::isValid(mProgramSelectionOverlay))
+    {
+        bgfx::destroy(mProgramSelectionOverlay);
+    }
     if (bgfx::isValid(mIndexBuffer))
     {
         bgfx::destroy(mIndexBuffer);
@@ -426,6 +432,14 @@ void RenderBridge::shutdown()
     if (bgfx::isValid(mVertexBuffer))
     {
         bgfx::destroy(mVertexBuffer);
+    }
+    if (bgfx::isValid(mSelectionOverlayEdgeIndexBuffer))
+    {
+        bgfx::destroy(mSelectionOverlayEdgeIndexBuffer);
+    }
+    if (bgfx::isValid(mSelectionOverlayVertexBuffer))
+    {
+        bgfx::destroy(mSelectionOverlayVertexBuffer);
     }
 
     bgfx::shutdown();
@@ -441,7 +455,7 @@ void RenderBridge::resize(uint16_t width, uint16_t height)
 {
     mWidth = width == ZERO_DIMENSION ? MINIMUM_DIMENSION : width;
     mHeight = height == ZERO_DIMENSION ? MINIMUM_DIMENSION : height;
-    bgfx::reset(mWidth, mHeight, BGFX_RESET_VSYNC);
+    bgfx::reset(mWidth, mHeight, RESET_FLAGS);
     bgfx::setViewRect(MAIN_VIEW_ID, VIEW_ORIGIN_X, VIEW_ORIGIN_Y, bgfx::BackbufferRatio::Equal);
 }
 
@@ -457,12 +471,7 @@ void RenderBridge::render(const Scene::RenderSnapshot &sceneSnapshot)
         uploadRenderMesh(*sceneSnapshot.renderMesh);
     }
 
-    uint32_t clearColor = sceneSnapshot.upToDate ? CLEAR_COLOR_READY : CLEAR_COLOR_BUILDING;
-    if (sceneSnapshot.objectSelected)
-    {
-        clearColor = sceneSnapshot.upToDate ? CLEAR_COLOR_READY_SELECTED : CLEAR_COLOR_BUILDING_SELECTED;
-    }
-    bgfx::setViewClear(MAIN_VIEW_ID, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, clearColor, VIEW_CLEAR_DEPTH, NO_DEPTH_STENCIL_CLEAR);
+    bgfx::setViewClear(MAIN_VIEW_ID, BGFX_CLEAR_COLOR | BGFX_CLEAR_DEPTH, CLEAR_COLOR_READY, VIEW_CLEAR_DEPTH, NO_DEPTH_STENCIL_CLEAR);
 
     /* Camera movement affects view matrices only; geometry stays unchanged. */
     const float cosPitch = bx::cos(sceneSnapshot.cameraPitchRadians);
@@ -511,6 +520,24 @@ void RenderBridge::render(const Scene::RenderSnapshot &sceneSnapshot)
         bgfx::setState(BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A | BGFX_STATE_WRITE_Z
                        | BGFX_STATE_DEPTH_TEST_LESS | BGFX_STATE_MSAA);
         bgfx::submit(MAIN_VIEW_ID, mProgramViewport);
+    }
+
+    if (bgfx::isValid(mProgramSelectionOverlay)
+        && bgfx::isValid(mSelectionOverlayVertexBuffer)
+        && bgfx::isValid(mSelectionOverlayEdgeIndexBuffer)
+        && mActiveSelectionOverlayVertexCount > ZERO_COUNT
+        && mActiveSelectionOverlayEdgeIndexCount > ZERO_COUNT)
+    {
+        float transform[MATRIX_ELEMENT_COUNT];
+        bx::mtxIdentity(transform);
+        bgfx::setTransform(transform);
+        bgfx::setVertexBuffer(VERTEX_STREAM_MAIN, mSelectionOverlayVertexBuffer, BUFFER_START_OFFSET, mActiveSelectionOverlayVertexCount);
+        bgfx::setIndexBuffer(mSelectionOverlayEdgeIndexBuffer, BUFFER_START_OFFSET, mActiveSelectionOverlayEdgeIndexCount);
+        bgfx::setState(
+            BGFX_STATE_WRITE_RGB | BGFX_STATE_WRITE_A
+            | BGFX_STATE_DEPTH_TEST_LEQUAL
+            | BGFX_STATE_MSAA);
+        bgfx::submit(MAIN_VIEW_ID, mProgramSelectionOverlay);
     }
 
     bgfx::frame();
@@ -611,6 +638,80 @@ bool RenderBridge::ensureMeshCapacity(uint32_t vertexCount, uint32_t indexCount)
     return true;
 }
 
+bool RenderBridge::ensureSelectionOverlayCapacity(uint32_t vertexCount, uint32_t edgeIndexCount)
+{
+    const bool needVertices = vertexCount > ZERO_COUNT;
+    const bool needEdgeIndices = edgeIndexCount > ZERO_COUNT;
+    if (!needVertices && !needEdgeIndices)
+    {
+        if (bgfx::isValid(mSelectionOverlayVertexBuffer))
+        {
+            bgfx::destroy(mSelectionOverlayVertexBuffer);
+            mSelectionOverlayVertexBuffer = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(mSelectionOverlayEdgeIndexBuffer))
+        {
+            bgfx::destroy(mSelectionOverlayEdgeIndexBuffer);
+            mSelectionOverlayEdgeIndexBuffer = BGFX_INVALID_HANDLE;
+        }
+
+        mSelectionOverlayVertexCapacity = ZERO_COUNT;
+        mSelectionOverlayEdgeIndexCapacity = ZERO_COUNT;
+        mActiveSelectionOverlayVertexCount = ZERO_COUNT;
+        mActiveSelectionOverlayEdgeIndexCount = ZERO_COUNT;
+        return true;
+    }
+
+    const bool growVertices = !bgfx::isValid(mSelectionOverlayVertexBuffer) || vertexCount > mSelectionOverlayVertexCapacity;
+    const bool growIndices = !bgfx::isValid(mSelectionOverlayEdgeIndexBuffer) || edgeIndexCount > mSelectionOverlayEdgeIndexCapacity;
+
+    if (!growVertices && !growIndices)
+    {
+        return true;
+    }
+
+    const auto newVertexCapacity = bx::max(vertexCount, mSelectionOverlayVertexCapacity * DYNAMIC_VERTEX_GROWTH_FACTOR, MINIMUM_SELECTION_OVERLAY_VERTEX_CAPACITY);
+    const auto newIndexCapacity = bx::max(edgeIndexCount, mSelectionOverlayEdgeIndexCapacity * DYNAMIC_INDEX_GROWTH_FACTOR, MINIMUM_SELECTION_OVERLAY_EDGE_INDEX_CAPACITY);
+
+    if (bgfx::isValid(mSelectionOverlayVertexBuffer))
+    {
+        bgfx::destroy(mSelectionOverlayVertexBuffer);
+        mSelectionOverlayVertexBuffer = BGFX_INVALID_HANDLE;
+    }
+    if (bgfx::isValid(mSelectionOverlayEdgeIndexBuffer))
+    {
+        bgfx::destroy(mSelectionOverlayEdgeIndexBuffer);
+        mSelectionOverlayEdgeIndexBuffer = BGFX_INVALID_HANDLE;
+    }
+
+    mSelectionOverlayVertexBuffer = bgfx::createDynamicVertexBuffer(newVertexCapacity, mVertexLayout);
+    mSelectionOverlayEdgeIndexBuffer = bgfx::createDynamicIndexBuffer(newIndexCapacity);
+
+    if (!bgfx::isValid(mSelectionOverlayVertexBuffer) || !bgfx::isValid(mSelectionOverlayEdgeIndexBuffer))
+    {
+        if (bgfx::isValid(mSelectionOverlayVertexBuffer))
+        {
+            bgfx::destroy(mSelectionOverlayVertexBuffer);
+            mSelectionOverlayVertexBuffer = BGFX_INVALID_HANDLE;
+        }
+        if (bgfx::isValid(mSelectionOverlayEdgeIndexBuffer))
+        {
+            bgfx::destroy(mSelectionOverlayEdgeIndexBuffer);
+            mSelectionOverlayEdgeIndexBuffer = BGFX_INVALID_HANDLE;
+        }
+
+        mSelectionOverlayVertexCapacity = ZERO_COUNT;
+        mSelectionOverlayEdgeIndexCapacity = ZERO_COUNT;
+        mActiveSelectionOverlayVertexCount = ZERO_COUNT;
+        mActiveSelectionOverlayEdgeIndexCount = ZERO_COUNT;
+        return false;
+    }
+
+    mSelectionOverlayVertexCapacity = newVertexCapacity;
+    mSelectionOverlayEdgeIndexCapacity = newIndexCapacity;
+    return true;
+}
+
 /**
  * Uploads CPU-built mesh buffers into bgfx dynamic buffers.
  * @param[in] meshData Built mesh data produced by the scene build step.
@@ -619,8 +720,15 @@ void RenderBridge::uploadRenderMesh(const Scene::BuiltMeshData &meshData)
 {
     const auto vertexCount = static_cast<uint32_t>(meshData.vertices.size());
     const auto indexCount = static_cast<uint32_t>(meshData.indices.size());
+    const auto selectionOverlayVertexCount = static_cast<uint32_t>(meshData.selectionOverlayEdgeVertices.size());
+    const auto selectionOverlayEdgeIndexCount = static_cast<uint32_t>(meshData.selectionOverlayEdgeIndices.size());
 
     if (!ensureMeshCapacity(vertexCount, indexCount))
+    {
+        return;
+    }
+
+    if (!ensureSelectionOverlayCapacity(selectionOverlayVertexCount, selectionOverlayEdgeIndexCount))
     {
         return;
     }
@@ -634,7 +742,23 @@ void RenderBridge::uploadRenderMesh(const Scene::BuiltMeshData &meshData)
     bgfx::update(mVertexBuffer, BUFFER_START_OFFSET, vertexMemory);
     bgfx::update(mIndexBuffer, BUFFER_START_OFFSET, indexMemory);
 
+    if (selectionOverlayVertexCount > ZERO_COUNT)
+    {
+        const auto selectionOverlayVertexBytes = static_cast<uint32_t>(meshData.selectionOverlayEdgeVertices.size() * sizeof(Scene::PackedVertex));
+        const bgfx::Memory *selectionOverlayVertexMemory = bgfx::copy(meshData.selectionOverlayEdgeVertices.data(), selectionOverlayVertexBytes);
+        bgfx::update(mSelectionOverlayVertexBuffer, BUFFER_START_OFFSET, selectionOverlayVertexMemory);
+    }
+
+    if (selectionOverlayEdgeIndexCount > ZERO_COUNT)
+    {
+        const auto selectionOverlayEdgeIndexBytes = static_cast<uint32_t>(meshData.selectionOverlayEdgeIndices.size() * sizeof(uint16_t));
+        const bgfx::Memory *selectionOverlayEdgeIndexMemory = bgfx::copy(meshData.selectionOverlayEdgeIndices.data(), selectionOverlayEdgeIndexBytes);
+        bgfx::update(mSelectionOverlayEdgeIndexBuffer, BUFFER_START_OFFSET, selectionOverlayEdgeIndexMemory);
+    }
+
     mActiveVertexCount = vertexCount;
     mActiveIndexCount = indexCount;
+    mActiveSelectionOverlayVertexCount = selectionOverlayVertexCount;
+    mActiveSelectionOverlayEdgeIndexCount = selectionOverlayEdgeIndexCount;
     mUploadedRevision = meshData.builtRevision;
 }

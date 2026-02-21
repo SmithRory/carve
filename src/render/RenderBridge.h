@@ -5,7 +5,7 @@
 
 #include <bgfx/bgfx.h>
 
-#include "scene/SceneCore.h"
+#include "scene/Types.h"
 
 /**
  * Bridges scene snapshots to bgfx resources and draw submission.
@@ -34,6 +34,7 @@ public:
 
 private:
     bool ensureMeshCapacity(uint32_t vertexCount, uint32_t indexCount);
+    bool ensureSelectionOverlayCapacity(uint32_t vertexCount, uint32_t edgeIndexCount);
     void uploadRenderMesh(const Scene::BuiltMeshData &meshData);
     void updateViewportUniforms(const Scene::RenderSnapshot &sceneSnapshot);
 
@@ -45,6 +46,7 @@ private:
     bgfx::DynamicVertexBufferHandle mVertexBuffer = BGFX_INVALID_HANDLE;
     bgfx::DynamicIndexBufferHandle mIndexBuffer = BGFX_INVALID_HANDLE;
     bgfx::ProgramHandle mProgramViewport = BGFX_INVALID_HANDLE;
+    bgfx::ProgramHandle mProgramSelectionOverlay = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle mUniformParams = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle mSamplerRadiance = BGFX_INVALID_HANDLE;
     bgfx::UniformHandle mSamplerIrradiance = BGFX_INVALID_HANDLE;
@@ -56,5 +58,11 @@ private:
     uint32_t mIndexCapacity{};
     uint32_t mActiveVertexCount{};
     uint32_t mActiveIndexCount{};
+    bgfx::DynamicVertexBufferHandle mSelectionOverlayVertexBuffer = BGFX_INVALID_HANDLE;
+    bgfx::DynamicIndexBufferHandle mSelectionOverlayEdgeIndexBuffer = BGFX_INVALID_HANDLE;
+    uint32_t mSelectionOverlayVertexCapacity{};
+    uint32_t mSelectionOverlayEdgeIndexCapacity{};
+    uint32_t mActiveSelectionOverlayVertexCount{};
+    uint32_t mActiveSelectionOverlayEdgeIndexCount{};
     uint64_t mUploadedRevision{};
 };

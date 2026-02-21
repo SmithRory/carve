@@ -1,4 +1,4 @@
-$input v_view, v_normal
+$input v_view, v_normal, v_color0
 
 /*
  * Copyright 2014-2016 Dario Manesku. All rights reserved.
@@ -50,7 +50,7 @@ void main()
 	float hdotv = clamp(dot(hh, vv), 0.0, 1.0);
 
 	// Material params.
-	vec3  inAlbedo       = u_rgbDiff.xyz;
+	vec3  inAlbedo       = u_rgbDiff.xyz * v_color0.xyz;
 	float inReflectivity = u_reflectivity;
 	float inGloss        = u_glossiness;
 

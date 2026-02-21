@@ -44,8 +44,22 @@ endif()
 
 set(CARVE_SOURCES
     src/main.cpp
-    src/scene/SceneCore.cpp
-    src/scene/SceneCore.h
+    src/scene/Types.h
+    src/scene/Core.cpp
+    src/scene/Core.h
+    src/scene/Document.cpp
+    src/scene/Document.h
+    src/scene/EditCommand.h
+    src/scene/UndoHistory.cpp
+    src/scene/UndoHistory.h
+    src/scene/CommandOps.cpp
+    src/scene/CommandOps.h
+    src/scene/EditSession.cpp
+    src/scene/EditSession.h
+    src/scene/Selection.cpp
+    src/scene/Selection.h
+    src/scene/MeshBuilder.cpp
+    src/scene/MeshBuilder.h
     src/render/RenderBridge.cpp
     src/render/RenderBridge.h
     src/ui/BgfxViewWidget.cpp
@@ -58,7 +72,13 @@ add_executable(carve ${CARVE_SOURCES})
 
 set(CARVE_TIDY_SOURCES
     src/main.cpp
-    src/scene/SceneCore.cpp
+    src/scene/Core.cpp
+    src/scene/Document.cpp
+    src/scene/UndoHistory.cpp
+    src/scene/CommandOps.cpp
+    src/scene/EditSession.cpp
+    src/scene/Selection.cpp
+    src/scene/MeshBuilder.cpp
     src/render/RenderBridge.cpp
     src/ui/BgfxViewWidget.cpp
     src/ui/MainWindow.cpp

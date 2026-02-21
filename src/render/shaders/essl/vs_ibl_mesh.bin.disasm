@@ -1,5 +1,7 @@
+attribute highp vec4 a_color0;
 attribute highp vec3 a_normal;
 attribute highp vec3 a_position;
+varying highp vec4 v_color0;
 varying highp vec3 v_normal;
 varying highp vec3 v_view;
 uniform highp mat4 u_modelViewProj;
@@ -19,5 +21,6 @@ void main ()
   tmpvar_3.w = 0.0;
   tmpvar_3.xyz = ((a_normal * 2.0) - 1.0);
   v_normal = (u_model[0] * tmpvar_3).xyz;
+  v_color0 = a_color0;
 }
 

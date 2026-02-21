@@ -1,14 +1,17 @@
 #include "BgfxViewWidget.h"
 
 #include <QApplication>
-#include <QEvent>
+#include <QAction>
+#include <QFocusEvent>
 #include <QKeyEvent>
+#include <QKeySequence>
 #include <QMetaObject>
 #include <QMouseEvent>
 #include <QPointer>
 #include <QResizeEvent>
 
 #include <algorithm>
+#include <cmath>
 #include <bx/bx.h>
 #include <chrono>
 #include <cstdint>
@@ -55,7 +58,7 @@ std::optional<Scene::CameraMove> keyToCameraMove(int key)
  * @param[in] parent Optional parent widget.
  */
 BgfxViewWidget::BgfxViewWidget(QThread *buildThread, QWidget *parent)
-    : QWidget(parent), mFrameTimer(this), mBuildWorker(new QObject()), mBuildThread(buildThread)
+    : QWidget(parent), mFrameTimer(this), mpBuildWorker(new QObject()), mpBuildThread(buildThread)
 {
     setAttribute(Qt::WA_NativeWindow, true);
     setAttribute(Qt::WA_PaintOnScreen, true);
@@ -63,13 +66,13 @@ BgfxViewWidget::BgfxViewWidget(QThread *buildThread, QWidget *parent)
     setAutoFillBackground(false);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
-    qApp->installEventFilter(this);
+    setupShortcuts();
 
     mFrameTimer.setInterval(FRAME_INTERVAL_MS);
     mFrameTimer.setTimerType(Qt::PreciseTimer);
     connect(&mFrameTimer, &QTimer::timeout, this, &BgfxViewWidget::renderFrame);
 
-    mBuildWorker->moveToThread(mBuildThread);
+    mpBuildWorker->moveToThread(mpBuildThread);
 }
 
 /**
@@ -77,13 +80,12 @@ BgfxViewWidget::BgfxViewWidget(QThread *buildThread, QWidget *parent)
  */
 BgfxViewWidget::~BgfxViewWidget()
 {
-    qApp->removeEventFilter(this);
-    const bool deleteQueued = QMetaObject::invokeMethod(mBuildWorker, &QObject::deleteLater, Qt::QueuedConnection);
+    const bool deleteQueued = QMetaObject::invokeMethod(mpBuildWorker, &QObject::deleteLater, Qt::QueuedConnection);
     if (!deleteQueued)
     {
-        delete mBuildWorker;
+        delete mpBuildWorker;
     }
-    mBuildWorker = nullptr;
+    mpBuildWorker = nullptr;
     shutdownRenderer();
 }
 
@@ -94,37 +96,6 @@ BgfxViewWidget::~BgfxViewWidget()
 QPaintEngine *BgfxViewWidget::paintEngine() const
 {
     return nullptr;
-}
-
-/**
- * Tracks Space key state globally while the widget is active.
- * @param[in] watched Event source object.
- * @param[in] event Event to process.
- * @return Result from base event filter.
- */
-bool BgfxViewWidget::eventFilter(QObject *watched, QEvent *event)
-{
-    if (event->type() == QEvent::KeyPress || event->type() == QEvent::KeyRelease)
-    {
-        auto *keyEvent = static_cast<QKeyEvent *>(event);
-        if (!keyEvent->isAutoRepeat() && keyEvent->key() == Qt::Key_Space)
-        {
-            mSpaceHeld = (event->type() == QEvent::KeyPress);
-            if (!mSpaceHeld)
-            {
-                mLookActive = false;
-                if (mCursorHiddenForLook)
-                {
-                    qApp->restoreOverrideCursor();
-                    mCursorHiddenForLook = false;
-                }
-                unsetCursor();
-                releaseMouse();
-            }
-        }
-    }
-
-    return QWidget::eventFilter(watched, event);
 }
 
 /**
@@ -146,24 +117,22 @@ void BgfxViewWidget::showEvent(QShowEvent *event)
 void BgfxViewWidget::hideEvent(QHideEvent *event)
 {
     mFrameTimer.stop();
-    mPrimaryEditActive = false;
-    mLookActive = false;
-    mSpaceHeld = false;
-    if (mCursorHiddenForLook)
-    {
-        qApp->restoreOverrideCursor();
-        mCursorHiddenForLook = false;
-    }
-    mSceneCore.endPrimaryEdit();
-    unsetCursor();
-    releaseMouse();
+    mPendingSelectionClick = false;
+    mPendingSelectionCtrlHeld = false;
+    mHeldKeys.clear();
+    stopLookInteraction();
 
-    mSceneCore.setCameraMoveState(Scene::CameraMove::Forward, false);
-    mSceneCore.setCameraMoveState(Scene::CameraMove::Backward, false);
-    mSceneCore.setCameraMoveState(Scene::CameraMove::Left, false);
-    mSceneCore.setCameraMoveState(Scene::CameraMove::Right, false);
+    stopAllCameraMovement();
 
     QWidget::hideEvent(event);
+}
+
+void BgfxViewWidget::focusOutEvent(QFocusEvent *event)
+{
+    mHeldKeys.clear();
+    stopLookInteraction();
+    stopAllCameraMovement();
+    QWidget::focusOutEvent(event);
 }
 
 /**
@@ -179,20 +148,24 @@ void BgfxViewWidget::resizeEvent(QResizeEvent *event)
     }
 
     initializeRenderer();
-    const uint16_t width = static_cast<uint16_t>(event->size().width());
-    const uint16_t height = static_cast<uint16_t>(event->size().height());
+    const qreal pixelRatio = devicePixelRatioF();
+    const uint16_t width = static_cast<uint16_t>(std::max(1L, std::lround(static_cast<double>(event->size().width()) * static_cast<double>(pixelRatio))));
+    const uint16_t height = static_cast<uint16_t>(std::max(1L, std::lround(static_cast<double>(event->size().height()) * static_cast<double>(pixelRatio))));
     mRenderBridge.resize(width, height);
 }
 
 /**
- * Starts either camera-look or primary edit interaction on left click.
+ * Starts camera-look or selection/component interaction on left click.
  * @param[in] event Qt mouse press event.
  */
 void BgfxViewWidget::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton)
     {
-        if (mSpaceHeld)
+        mPendingSelectionClick = false;
+        mPendingSelectionCtrlHeld = false;
+
+        if (mHeldKeys.contains(Qt::Key_Space))
         {
             mLookActive = true;
             mLastMousePosition = event->position();
@@ -206,8 +179,21 @@ void BgfxViewWidget::mousePressEvent(QMouseEvent *event)
         }
         else
         {
-            mPrimaryEditActive = true;
-            mSceneCore.beginPrimaryEdit(static_cast<float>(event->position().y()));
+            const float mouseX = static_cast<float>(event->position().x());
+            const float mouseY = static_cast<float>(event->position().y());
+            const bool ctrlHeld = (event->modifiers() & Qt::ControlModifier) != 0;
+            const bool componentHit = mSceneCore.selectComponentAtScreen(
+                mouseX,
+                mouseY,
+                static_cast<float>(width()),
+                static_cast<float>(height()),
+                ctrlHeld);
+
+            if (!componentHit)
+            {
+                mPendingSelectionClick = true;
+                mPendingSelectionCtrlHeld = ctrlHeld;
+            }
         }
         setFocus(Qt::MouseFocusReason);
     }
@@ -223,32 +209,27 @@ void BgfxViewWidget::mouseReleaseEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton)
     {
-        mPrimaryEditActive = false;
-        mSceneCore.endPrimaryEdit();
-        mLookActive = false;
-        if (mCursorHiddenForLook)
+        if (mPendingSelectionClick)
         {
-            qApp->restoreOverrideCursor();
-            mCursorHiddenForLook = false;
+            const float mouseX = static_cast<float>(event->position().x());
+            const float mouseY = static_cast<float>(event->position().y());
+            mSceneCore.selectObjectAtScreen(mouseX, mouseY, static_cast<float>(width()), static_cast<float>(height()), mPendingSelectionCtrlHeld);
         }
-        unsetCursor();
-        releaseMouse();
+        mPendingSelectionClick = false;
+        mPendingSelectionCtrlHeld = false;
+
+        stopLookInteraction();
     }
 
     QWidget::mouseReleaseEvent(event);
 }
 
 /**
- * Routes mouse motion to edit extrusion or camera look updates.
+ * Routes mouse motion to camera look updates.
  * @param[in] event Qt mouse move event.
  */
 void BgfxViewWidget::mouseMoveEvent(QMouseEvent *event)
 {
-    if (mPrimaryEditActive && (event->buttons() & Qt::LeftButton))
-    {
-        mSceneCore.updatePrimaryEdit(static_cast<float>(event->position().y()));
-    }
-
     if (mLookActive && (event->buttons() & Qt::LeftButton))
     {
         const QPointF delta = event->position() - mLastMousePosition;
@@ -260,7 +241,7 @@ void BgfxViewWidget::mouseMoveEvent(QMouseEvent *event)
 }
 
 /**
- * Handles movement-key activation and look-mode modifier state.
+ * Handles editor shortcuts and movement-key activation.
  * @param[in] event Qt key press event.
  */
 void BgfxViewWidget::keyPressEvent(QKeyEvent *event)
@@ -271,15 +252,16 @@ void BgfxViewWidget::keyPressEvent(QKeyEvent *event)
         return;
     }
 
-    if (event->key() == Qt::Key_Space)
-    {
-        mSpaceHeld = true;
-    }
+    mHeldKeys.insert(event->key());
 
-    const std::optional<Scene::CameraMove> move = keyToCameraMove(event->key());
-    if (move.has_value())
+    const Qt::KeyboardModifiers disallowed = Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier | Qt::ShiftModifier;
+    if ((event->modifiers() & disallowed) == Qt::NoModifier)
     {
-        mSceneCore.setCameraMoveState(*move, true);
+        const std::optional<Scene::CameraMove> move = keyToCameraMove(event->key());
+        if (move.has_value())
+        {
+            mSceneCore.setCameraMoveState(*move, true);
+        }
     }
 
     QWidget::keyPressEvent(event);
@@ -297,18 +279,7 @@ void BgfxViewWidget::keyReleaseEvent(QKeyEvent *event)
         return;
     }
 
-    if (event->key() == Qt::Key_Space)
-    {
-        mSpaceHeld = false;
-        mLookActive = false;
-        if (mCursorHiddenForLook)
-        {
-            qApp->restoreOverrideCursor();
-            mCursorHiddenForLook = false;
-        }
-        unsetCursor();
-        releaseMouse();
-    }
+    mHeldKeys.remove(event->key());
 
     const std::optional<Scene::CameraMove> move = keyToCameraMove(event->key());
     if (move.has_value())
@@ -317,6 +288,134 @@ void BgfxViewWidget::keyReleaseEvent(QKeyEvent *event)
     }
 
     QWidget::keyReleaseEvent(event);
+}
+
+void BgfxViewWidget::setupShortcuts()
+{
+    mpUndoAction = new QAction(this);
+    mpRedoAction = new QAction(this);
+    mpCreateCubeAction = new QAction(this);
+    mpDeleteSelectionAction = new QAction(this);
+    mpCycleSelectionAction = new QAction(this);
+    mpClearSelectionAction = new QAction(this);
+
+    const auto applyShortcutContext = [](QAction *action)
+    {
+        action->setShortcutContext(Qt::WidgetWithChildrenShortcut);
+    };
+
+    applyShortcutContext(mpUndoAction);
+    applyShortcutContext(mpRedoAction);
+    applyShortcutContext(mpCreateCubeAction);
+    applyShortcutContext(mpDeleteSelectionAction);
+    applyShortcutContext(mpCycleSelectionAction);
+    applyShortcutContext(mpClearSelectionAction);
+
+    mpUndoAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_Z));
+    mpRedoAction->setShortcuts({ QKeySequence(Qt::CTRL | Qt::SHIFT | Qt::Key_Z), QKeySequence(Qt::CTRL | Qt::Key_Y) });
+    mpCreateCubeAction->setShortcut(QKeySequence(Qt::SHIFT | Qt::Key_A));
+    mpDeleteSelectionAction->setShortcuts({ QKeySequence(Qt::Key_X), QKeySequence(Qt::Key_Delete) });
+    mpCycleSelectionAction->setShortcut(QKeySequence(Qt::Key_Tab));
+    mpClearSelectionAction->setShortcut(QKeySequence(Qt::Key_Escape));
+
+    addAction(mpUndoAction);
+    addAction(mpRedoAction);
+    addAction(mpCreateCubeAction);
+    addAction(mpDeleteSelectionAction);
+    addAction(mpCycleSelectionAction);
+    addAction(mpClearSelectionAction);
+
+    connect(mpUndoAction, &QAction::triggered, this, [this]() { mSceneCore.undo(); });
+    connect(mpRedoAction, &QAction::triggered, this, [this]() { mSceneCore.redo(); });
+    connect(mpCreateCubeAction, &QAction::triggered, this, [this]() { mSceneCore.createCubeInFrontOfCamera(); });
+    connect(mpDeleteSelectionAction, &QAction::triggered, this, [this]() { mSceneCore.deleteSelectedObject(); });
+    connect(mpCycleSelectionAction, &QAction::triggered, this, [this]() { mSceneCore.selectNextObject(); });
+    connect(mpClearSelectionAction, &QAction::triggered, this, [this]() { mSceneCore.clearSelection(); });
+}
+
+QAction *BgfxViewWidget::actionForCommand(ShortcutCommand command)
+{
+    switch (command)
+    {
+    case ShortcutCommand::Undo:
+        return mpUndoAction;
+    case ShortcutCommand::Redo:
+        return mpRedoAction;
+    case ShortcutCommand::CreateCube:
+        return mpCreateCubeAction;
+    case ShortcutCommand::DeleteSelection:
+        return mpDeleteSelectionAction;
+    case ShortcutCommand::CycleSelection:
+        return mpCycleSelectionAction;
+    case ShortcutCommand::ClearSelection:
+        return mpClearSelectionAction;
+    }
+
+    return nullptr;
+}
+
+const QAction *BgfxViewWidget::actionForCommand(ShortcutCommand command) const
+{
+    switch (command)
+    {
+    case ShortcutCommand::Undo:
+        return mpUndoAction;
+    case ShortcutCommand::Redo:
+        return mpRedoAction;
+    case ShortcutCommand::CreateCube:
+        return mpCreateCubeAction;
+    case ShortcutCommand::DeleteSelection:
+        return mpDeleteSelectionAction;
+    case ShortcutCommand::CycleSelection:
+        return mpCycleSelectionAction;
+    case ShortcutCommand::ClearSelection:
+        return mpClearSelectionAction;
+    }
+
+    return nullptr;
+}
+
+void BgfxViewWidget::setShortcutBinding(ShortcutCommand command, const QKeySequence &sequence)
+{
+    QAction *action = actionForCommand(command);
+    if (action == nullptr)
+    {
+        return;
+    }
+
+    action->setShortcut(sequence);
+}
+
+QKeySequence BgfxViewWidget::shortcutBinding(ShortcutCommand command) const
+{
+    const QAction *action = actionForCommand(command);
+    if (action == nullptr)
+    {
+        return {};
+    }
+
+    return action->shortcut();
+}
+
+void BgfxViewWidget::stopLookInteraction()
+{
+    mLookActive = false;
+    if (mCursorHiddenForLook)
+    {
+        qApp->restoreOverrideCursor();
+        mCursorHiddenForLook = false;
+    }
+
+    unsetCursor();
+    releaseMouse();
+}
+
+void BgfxViewWidget::stopAllCameraMovement()
+{
+    mSceneCore.setCameraMoveState(Scene::CameraMove::Forward, false);
+    mSceneCore.setCameraMoveState(Scene::CameraMove::Backward, false);
+    mSceneCore.setCameraMoveState(Scene::CameraMove::Left, false);
+    mSceneCore.setCameraMoveState(Scene::CameraMove::Right, false);
 }
 
 /**
@@ -335,8 +434,9 @@ void BgfxViewWidget::initializeRenderer()
     void *nativeWindowHandle = reinterpret_cast<void *>(winId());
 #endif
 
-    const uint32_t renderWidth = static_cast<uint32_t>(width());
-    const uint32_t renderHeight = static_cast<uint32_t>(height());
+    const qreal pixelRatio = devicePixelRatioF();
+    const uint32_t renderWidth = static_cast<uint32_t>(std::max(1L, std::lround(static_cast<double>(width()) * static_cast<double>(pixelRatio))));
+    const uint32_t renderHeight = static_cast<uint32_t>(std::max(1L, std::lround(static_cast<double>(height()) * static_cast<double>(pixelRatio))));
     mRenderBridge.initialize(nativeWindowHandle, renderWidth, renderHeight);
 }
 
@@ -363,10 +463,9 @@ void BgfxViewWidget::scheduleBuildWork()
     QPointer<BgfxViewWidget> self(this);
 
     QMetaObject::invokeMethod(
-        mBuildWorker,
+        mpBuildWorker,
         [self, ticket]() mutable
     {
-        /* Build on worker thread, then marshal completion back to the UI thread. */
         Scene::BuiltMeshData builtForUiThread = Scene::Core::buildRenderMesh(ticket);
 
         QMetaObject::invokeMethod(
@@ -399,7 +498,6 @@ void BgfxViewWidget::renderFrame()
     float dtSeconds = DEFAULT_DT_SECONDS;
     if (mHasFrameTime)
     {
-        /* Clamp dt to avoid large camera jumps after stalls or tab switches. */
         dtSeconds = std::chrono::duration<float>(now - mLastFrameTime).count();
         dtSeconds = bx::clamp(dtSeconds, MIN_DT_SECONDS, MAX_DT_SECONDS);
     }

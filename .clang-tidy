@@ -14,7 +14,9 @@ Checks: >-
   -modernize-use-trailing-return-type,
   -bugprone-easily-swappable-parameters,
   -pro-bounds-constant-array-index,
-  -misc-non-private-member-variables-in-classes
+  -misc-non-private-member-variables-in-classes,
+  -readability-identifier-length,
+  -cppcoreguidelines-pro-bounds-constant-array-index
 WarningsAsErrors: ''
 HeaderFilterRegex: '^src/.*'
 FormatStyle: >-
