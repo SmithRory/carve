@@ -1,5 +1,6 @@
 #include "CommandOps.h"
 
+#include <ranges>
 #include <type_traits>
 
 namespace Scene
@@ -21,6 +22,12 @@ void restoreSelection(Document &document, ObjectId selectionId)
 }
 } // namespace
 
+/**
+ * Applies a command in forward direction.
+ * @param[in,out] document Mutable document state.
+ * @param[in] command Command to apply.
+ * @return True when document state changed.
+ */
 bool applyCommandForward(Document &document, const EditCommand &command)
 {
     return std::visit(
@@ -66,15 +73,15 @@ bool applyCommandForward(Document &document, const EditCommand &command)
                 return false;
             }
 
-            for (std::size_t i = 0U; i < typedCommand.vertexIndices.size(); ++i)
+            for (const std::size_t idx : std::views::iota(std::size_t{ 0U }, typedCommand.vertexIndices.size()))
             {
-                const uint16_t vertexIndex = typedCommand.vertexIndices[i];
+                const uint16_t vertexIndex = typedCommand.vertexIndices[idx];
                 if (vertexIndex >= object->localVertices.size())
                 {
                     return false;
                 }
 
-                object->localVertices[vertexIndex].y = typedCommand.afterY[i];
+                object->localVertices[vertexIndex].y = typedCommand.afterY[idx];
             }
             return true;
         }
@@ -95,6 +102,12 @@ bool applyCommandForward(Document &document, const EditCommand &command)
         command);
 }
 
+/**
+ * Applies a command in reverse direction.
+ * @param[in,out] document Mutable document state.
+ * @param[in] command Command to reverse.
+ * @return True when document state changed.
+ */
 bool applyCommandBackward(Document &document, const EditCommand &command)
 {
     return std::visit(
@@ -132,15 +145,15 @@ bool applyCommandBackward(Document &document, const EditCommand &command)
                 return false;
             }
 
-            for (std::size_t i = 0U; i < typedCommand.vertexIndices.size(); ++i)
+            for (const std::size_t idx : std::views::iota(std::size_t{ 0U }, typedCommand.vertexIndices.size()))
             {
-                const uint16_t vertexIndex = typedCommand.vertexIndices[i];
+                const uint16_t vertexIndex = typedCommand.vertexIndices[idx];
                 if (vertexIndex >= object->localVertices.size())
                 {
                     return false;
                 }
 
-                object->localVertices[vertexIndex].y = typedCommand.beforeY[i];
+                object->localVertices[vertexIndex].y = typedCommand.beforeY[idx];
             }
             return true;
         }

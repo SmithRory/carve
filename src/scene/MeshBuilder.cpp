@@ -1,9 +1,11 @@
 #include "MeshBuilder.h"
+#include "scene/TopologyUtils.h"
 
 #include <array>
 #include <bx/math.h>
 #include <bx/pixelformat.h>
 #include <cmath>
+#include <ranges>
 #include <unordered_set>
 
 namespace
@@ -34,7 +36,7 @@ constexpr uint32_t OVERLAY_COLOR_SELECTED_ABGR = 0xff0080ffU;
 
 uint32_t packNormal(const bx::Vec3 &normal)
 {
-    const float mapped[VECTOR_COMPONENT_COUNT] = {
+    const std::array<float, VECTOR_COMPONENT_COUNT> mapped = {
         (normal.x * NORMAL_MAP_SCALE) + NORMAL_MAP_BIAS,
         (normal.y * NORMAL_MAP_SCALE) + NORMAL_MAP_BIAS,
         (normal.z * NORMAL_MAP_SCALE) + NORMAL_MAP_BIAS,
@@ -42,7 +44,7 @@ uint32_t packNormal(const bx::Vec3 &normal)
     };
 
     uint32_t packed = ZERO_PACKED_NORMAL;
-    bx::packRgba8(&packed, mapped);
+    bx::packRgba8(&packed, mapped.data());
     return packed;
 }
 
@@ -123,30 +125,20 @@ void appendMeshTriangles(Scene::BuiltMeshData &built, const Scene::BuildObject &
         object.selectedFaceIndices.begin(),
         object.selectedFaceIndices.end());
 
-    for (Scene::TopologyIndex faceIndex = 0U; faceIndex < object.faces.size(); ++faceIndex)
+    for (const std::size_t faceIndex : std::views::iota(std::size_t{ 0U }, object.faces.size()))
     {
         const Scene::Face &face = object.faces[faceIndex];
-        if (face.size() < 3U)
+        Scene::forEachFaceTriangle(face, [&](const std::array<Scene::TopologyIndex, 3> &triangle)
         {
-            continue;
-        }
-
-        const uint16_t baseIndex = face[0];
-        if (baseIndex >= object.localVertices.size())
-        {
-            continue;
-        }
-
-        const bx::Vec3 p0 = bx::add(object.position, object.localVertices[baseIndex]);
-        for (std::size_t i = 1U; i + 1U < face.size(); ++i)
-        {
-            const uint16_t i1 = face[i];
-            const uint16_t i2 = face[i + 1U];
-            if (i1 >= object.localVertices.size() || i2 >= object.localVertices.size())
+            const auto [i0, i1, i2] = triangle;
+            if (i0 >= object.localVertices.size()
+                || i1 >= object.localVertices.size()
+                || i2 >= object.localVertices.size())
             {
-                continue;
+                return;
             }
 
+            const bx::Vec3 p0 = bx::add(object.position, object.localVertices[i0]);
             const bx::Vec3 p1 = bx::add(object.position, object.localVertices[i1]);
             const bx::Vec3 p2 = bx::add(object.position, object.localVertices[i2]);
 
@@ -155,14 +147,14 @@ void appendMeshTriangles(Scene::BuiltMeshData &built, const Scene::BuildObject &
             bx::Vec3 normal = bx::cross(e1, e2);
             if (bx::dot(normal, normal) < NEAR_ZERO_EPSILON)
             {
-                continue;
+                return;
             }
 
             /* Emit non-index-shared triangle vertices so each face can keep a flat normal. */
             normal = bx::normalize(normal);
 
             const uint16_t base = static_cast<uint16_t>(built.vertices.size());
-            const uint32_t color = selectedFaces.find(faceIndex) != selectedFaces.end()
+            const uint32_t color = selectedFaces.find(static_cast<Scene::TopologyIndex>(faceIndex)) != selectedFaces.end()
                                        ? SELECTED_FACE_COLOR_ABGR
                                        : objectColor;
             const uint32_t packedNormal = packNormal(normal);
@@ -174,7 +166,7 @@ void appendMeshTriangles(Scene::BuiltMeshData &built, const Scene::BuildObject &
             built.indices.push_back(base + 0U);
             built.indices.push_back(base + 1U);
             built.indices.push_back(base + 2U);
-        }
+        });
     }
 }
 
@@ -185,9 +177,10 @@ void appendVertexMarkerSphere(Scene::BuiltMeshData &built, const bx::Vec3 &cente
 
     for (const auto &unit : sphere.unitVertices)
     {
+        const auto [ux, uy, uz] = unit;
         const bx::Vec3 markerPosition = bx::add(
             center,
-            bx::mul(bx::Vec3{ unit[0], unit[1], unit[2] }, SELECTION_VERTEX_MARKER_RADIUS));
+            bx::mul(bx::Vec3{ ux, uy, uz }, SELECTION_VERTEX_MARKER_RADIUS));
         built.selectionOverlayEdgeVertices.push_back(Scene::PackedVertex{
             .x = markerPosition.x,
             .y = markerPosition.y,
@@ -243,10 +236,10 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
         2, 6, 0, 0, 6, 4,
     };
 
-    for (Scene::TopologyIndex edgeIndex = 0U; edgeIndex < object.edges.size(); ++edgeIndex)
+    for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
         const Scene::Edge &edge = object.edges[edgeIndex];
-        const uint32_t edgeColor = selectedEdges.find(edgeIndex) != selectedEdges.end()
+        const uint32_t edgeColor = selectedEdges.find(static_cast<Scene::TopologyIndex>(edgeIndex)) != selectedEdges.end()
                                        ? OVERLAY_COLOR_SELECTED_ABGR
                                        : OVERLAY_COLOR_DEFAULT_ABGR;
 
@@ -312,10 +305,10 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
     }
 
     /* Generate per-vertex markers and color them by component selection state. */
-    for (Scene::TopologyIndex vertexIndex = 0U; vertexIndex < object.localVertices.size(); ++vertexIndex)
+    for (const std::size_t vertexIndex : std::views::iota(std::size_t{ 0U }, object.localVertices.size()))
     {
         const bx::Vec3 &localVertex = object.localVertices[vertexIndex];
-        const uint32_t vertexColor = selectedVertices.find(vertexIndex) != selectedVertices.end()
+        const uint32_t vertexColor = selectedVertices.find(static_cast<Scene::TopologyIndex>(vertexIndex)) != selectedVertices.end()
                                          ? OVERLAY_COLOR_SELECTED_ABGR
                                          : OVERLAY_COLOR_DEFAULT_ABGR;
         const bx::Vec3 worldPosition = bx::add(object.position, localVertex);
@@ -329,6 +322,11 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
 namespace Scene
 {
 
+/**
+ * Builds renderable mesh buffers from an immutable build ticket.
+ * @param[in] ticket Immutable build input payload.
+ * @return Built mesh data tagged with ticket revision.
+ */
 BuiltMeshData buildMeshFromTicket(const BuildTicket &ticket)
 {
     BuiltMeshData built{};

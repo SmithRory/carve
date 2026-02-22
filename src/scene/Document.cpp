@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <ranges>
 #include <unordered_map>
 
 namespace Scene
@@ -19,21 +20,38 @@ uint32_t edgeKey(uint16_t a, uint16_t b)
 }
 } // namespace
 
+/**
+ * Returns objects in draw-order/index order.
+ * @return Object container in document order.
+ */
 const std::vector<EditableObject> &Document::objects() const
 {
     return mObjects;
 }
 
+/**
+ * Returns currently selected object id, or zero if no selection.
+ * @return Selected object id, or zero.
+ */
 ObjectId Document::selectedObjectId() const
 {
     return mPrimarySelectedObjectId;
 }
 
+/**
+ * Returns true when an object is currently selected.
+ * @return True when there is an active selection.
+ */
 bool Document::hasSelection() const
 {
     return !mSelectedObjectIds.empty();
 }
 
+/**
+ * Selects an object by id. Returns true when selection changed.
+ * @param[in] id Object id to select.
+ * @return True when selection state changed.
+ */
 bool Document::selectObject(ObjectId id)
 {
     if (id == 0U)
@@ -58,6 +76,11 @@ bool Document::selectObject(ObjectId id)
     return true;
 }
 
+/**
+ * Adds an object to the current selection set. Returns true when selection changed.
+ * @param[in] id Object id to include in selection.
+ * @return True when selection state changed.
+ */
 bool Document::addToSelection(ObjectId id)
 {
     if (id == 0U)
@@ -81,11 +104,20 @@ bool Document::addToSelection(ObjectId id)
     return false;
 }
 
+/**
+ * Returns true when object id is part of current selection set.
+ * @param[in] id Object id to test.
+ * @return True when object is selected.
+ */
 bool Document::isObjectSelected(ObjectId id) const
 {
     return mSelectedObjectIds.find(id) != mSelectedObjectIds.end();
 }
 
+/**
+ * Clears selection. Returns true when selection changed.
+ * @return True when selection state changed.
+ */
 bool Document::clearSelection()
 {
     if (mSelectedObjectIds.empty())
@@ -99,6 +131,10 @@ bool Document::clearSelection()
     return true;
 }
 
+/**
+ * Cycles selection to the next object. Returns true when changed.
+ * @return True when selection state changed.
+ */
 bool Document::selectNext()
 {
     if (mObjects.empty())
@@ -263,6 +299,11 @@ const std::unordered_set<uint16_t> &Document::selectedFaceIndices() const
     return mResolvedSelectedFaceIndices;
 }
 
+/**
+ * Finds an object by id, or nullptr when missing.
+ * @param[in] id Object id to find.
+ * @return Mutable pointer to object, or nullptr.
+ */
 EditableObject *Document::findObject(ObjectId id)
 {
     const auto found = mObjectIndices.find(id);
@@ -274,6 +315,11 @@ EditableObject *Document::findObject(ObjectId id)
     return &mObjects[found->second];
 }
 
+/**
+ * Finds an object by id, or nullptr when missing.
+ * @param[in] id Object id to find.
+ * @return Immutable pointer to object, or nullptr.
+ */
 const EditableObject *Document::findObject(ObjectId id) const
 {
     const auto found = mObjectIndices.find(id);
@@ -285,16 +331,29 @@ const EditableObject *Document::findObject(ObjectId id) const
     return &mObjects[found->second];
 }
 
+/**
+ * Returns selected object, or nullptr when nothing is selected.
+ * @return Mutable pointer to selected object, or nullptr.
+ */
 EditableObject *Document::selectedObject()
 {
     return findObject(mPrimarySelectedObjectId);
 }
 
+/**
+ * Returns selected object, or nullptr when nothing is selected.
+ * @return Immutable pointer to selected object, or nullptr.
+ */
 const EditableObject *Document::selectedObject() const
 {
     return findObject(mPrimarySelectedObjectId);
 }
 
+/**
+ * Inserts an object at index, clamping to valid range.
+ * @param[in] object Object to insert.
+ * @param[in] index Preferred insertion index.
+ */
 void Document::addObject(const EditableObject &object, std::size_t index)
 {
     const std::size_t clampedIndex = bx::min(index, mObjects.size());
@@ -302,6 +361,12 @@ void Document::addObject(const EditableObject &object, std::size_t index)
     reindexFrom(clampedIndex);
 }
 
+/**
+ * Removes an object by id and outputs previous index when found.
+ * @param[in] id Object id to remove.
+ * @param[out] outIndex Previous object index when removal succeeds.
+ * @return Removed object when found, otherwise std::nullopt.
+ */
 std::optional<EditableObject> Document::removeObject(ObjectId id, std::size_t &outIndex)
 {
     const auto found = mObjectIndices.find(id);
@@ -347,7 +412,7 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
     /* Start from explicitly selected edges, then add edges implied by selected endpoint pairs. */
     mResolvedSelectedEdgeIndices = mExplicitSelectedEdgeIndices;
 
-    for (std::size_t edgeIndex = 0U; edgeIndex < object.edges.size(); ++edgeIndex)
+    for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
         const auto &edge = object.edges[edgeIndex];
         if (mSelectedVertexIndices.find(edge[0]) != mSelectedVertexIndices.end() && mSelectedVertexIndices.find(edge[1]) != mSelectedVertexIndices.end())
@@ -360,12 +425,13 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
     mResolvedSelectedFaceIndices = mExplicitSelectedFaceIndices;
     std::unordered_map<uint32_t, uint16_t> edgeLookup;
     edgeLookup.reserve(object.edges.size());
-    for (std::size_t edgeIndex = 0U; edgeIndex < object.edges.size(); ++edgeIndex)
+    for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
-        edgeLookup[edgeKey(object.edges[edgeIndex][0], object.edges[edgeIndex][1])] = static_cast<uint16_t>(edgeIndex);
+        const auto &edge = object.edges[edgeIndex];
+        edgeLookup[edgeKey(edge[0], edge[1])] = static_cast<uint16_t>(edgeIndex);
     }
 
-    for (std::size_t faceIdx = 0U; faceIdx < object.faces.size(); ++faceIdx)
+    for (const std::size_t faceIdx : std::views::iota(std::size_t{ 0U }, object.faces.size()))
     {
         const Face &face = object.faces[faceIdx];
         if (face.size() < 3U)
@@ -374,15 +440,25 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
         }
 
         bool allEdgesSelected = true;
-        for (std::size_t i = 0U; i < face.size(); ++i)
+        const uint16_t firstVertex = face.front();
+        uint16_t previousVertex = firstVertex;
+        for (const uint16_t currentVertex : face | std::views::drop(1))
         {
-            const uint16_t v0 = face[i];
-            const uint16_t v1 = face[(i + 1U) % face.size()];
-            const auto edgeIt = edgeLookup.find(edgeKey(v0, v1));
+            const auto edgeIt = edgeLookup.find(edgeKey(previousVertex, currentVertex));
             if (edgeIt == edgeLookup.end() || mResolvedSelectedEdgeIndices.find(edgeIt->second) == mResolvedSelectedEdgeIndices.end())
             {
                 allEdgesSelected = false;
                 break;
+            }
+            previousVertex = currentVertex;
+        }
+
+        if (allEdgesSelected)
+        {
+            const auto edgeIt = edgeLookup.find(edgeKey(previousVertex, firstVertex));
+            if (edgeIt == edgeLookup.end() || mResolvedSelectedEdgeIndices.find(edgeIt->second) == mResolvedSelectedEdgeIndices.end())
+            {
+                allEdgesSelected = false;
             }
         }
 

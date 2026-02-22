@@ -5,6 +5,7 @@
 
 #include "scene/Document.h"
 #include "scene/EditCommand.h"
+#include "scene/Types.h"
 
 namespace Scene
 {
@@ -15,52 +16,12 @@ namespace Scene
 class EditSession
 {
 public:
-    /**
-     * Starts an extrusion drag on the selected object.
-     * @param[in] document Current document state.
-     * @param[in] mouseY Cursor y position in pixels.
-     */
     void beginExtrude(const Document &document, float mouseY);
-    /**
-     * Applies one extrusion drag update. Returns true when object changed.
-     * @param[in,out] document Mutable document state.
-     * @param[in] mouseY Cursor y position in pixels.
-     * @return True when extrusion changed object state.
-     */
     bool updateExtrude(Document &document, float mouseY);
-    /**
-     * Ends extrusion drag and returns a command when changed.
-     * @param[in] document Current document state.
-     * @return Undo command when extrusion changed object state.
-     */
     std::optional<EditCommand> endExtrude(const Document &document);
-
-    /**
-     * Starts a translation drag on the selected object.
-     * @param[in] document Current document state.
-     * @param[in] mouseX Cursor x position in pixels.
-     * @param[in] mouseY Cursor y position in pixels.
-     */
-    void beginTranslate(const Document &document, float mouseX, float mouseY);
-    /**
-     * Applies one translation drag update. Returns true when object changed.
-     * @param[in,out] document Mutable document state.
-     * @param[in] cameraYawRadians Camera yaw in radians.
-     * @param[in] mouseX Cursor x position in pixels.
-     * @param[in] mouseY Cursor y position in pixels.
-     * @return True when translation changed object state.
-     */
-    bool updateTranslate(Document &document, float cameraYawRadians, float mouseX, float mouseY);
-    /**
-     * Ends translation drag and returns a command when changed.
-     * @param[in] document Current document state.
-     * @return Undo command when translation changed object state.
-     */
+    void beginTranslate(const Document &document, const MousePosition &mousePosition);
+    bool updateTranslate(Document &document, float cameraYawRadians, const MousePosition &mousePosition);
     std::optional<EditCommand> endTranslate(const Document &document);
-
-    /**
-     * Cancels all active drag interactions.
-     */
     void cancel();
 
 private:

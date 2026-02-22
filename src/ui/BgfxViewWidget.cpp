@@ -179,12 +179,13 @@ void BgfxViewWidget::mousePressEvent(QMouseEvent *event)
         }
         else
         {
-            const float mouseX = static_cast<float>(event->position().x());
-            const float mouseY = static_cast<float>(event->position().y());
+            const Scene::MousePosition mousePosition{
+                .x = static_cast<float>(event->position().x()),
+                .y = static_cast<float>(event->position().y()),
+            };
             const bool ctrlHeld = (event->modifiers() & Qt::ControlModifier) != 0;
             const bool componentHit = mSceneCore.selectComponentAtScreen(
-                mouseX,
-                mouseY,
+                mousePosition,
                 static_cast<float>(width()),
                 static_cast<float>(height()),
                 ctrlHeld);
@@ -211,9 +212,11 @@ void BgfxViewWidget::mouseReleaseEvent(QMouseEvent *event)
     {
         if (mPendingSelectionClick)
         {
-            const float mouseX = static_cast<float>(event->position().x());
-            const float mouseY = static_cast<float>(event->position().y());
-            mSceneCore.selectObjectAtScreen(mouseX, mouseY, static_cast<float>(width()), static_cast<float>(height()), mPendingSelectionCtrlHeld);
+            const Scene::MousePosition mousePosition{
+                .x = static_cast<float>(event->position().x()),
+                .y = static_cast<float>(event->position().y()),
+            };
+            mSceneCore.selectObjectAtScreen(mousePosition, static_cast<float>(width()), static_cast<float>(height()), mPendingSelectionCtrlHeld);
         }
         mPendingSelectionClick = false;
         mPendingSelectionCtrlHeld = false;

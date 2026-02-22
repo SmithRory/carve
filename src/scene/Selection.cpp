@@ -1,28 +1,41 @@
 #include "Selection.h"
+#include "scene/TopologyUtils.h"
 
+#include <array>
 #include <bx/math.h>
 #include <limits>
+#include <optional>
+#include <ranges>
+#include <span>
 #include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace
 {
 constexpr float CAMERA_FOV_DEGREES = 60.0F;
 constexpr float INTERSECTION_EPSILON = 0.000001F;
-constexpr float MISS_T = -1.0F;
 constexpr float VERTEX_PICK_RADIUS_PIXELS = 18.0F;
 constexpr float EDGE_PICK_RADIUS_PIXELS = 16.0F;
+
+uint32_t edgeKey(uint16_t a, uint16_t b)
+{
+    const uint16_t lo = bx::min(a, b);
+    const uint16_t hi = bx::max(a, b);
+    return (static_cast<uint32_t>(lo) << 16U) | static_cast<uint32_t>(hi);
+}
 
 bool intersectRayAabb(const bx::Vec3 &origin, const bx::Vec3 &direction, const bx::Vec3 &minBounds, const bx::Vec3 &maxBounds, float &outT)
 {
     float tMin = 0.0F;
     float tMax = std::numeric_limits<float>::max();
 
-    const float originValues[3] = { origin.x, origin.y, origin.z };
-    const float directionValues[3] = { direction.x, direction.y, direction.z };
-    const float minValues[3] = { minBounds.x, minBounds.y, minBounds.z };
-    const float maxValues[3] = { maxBounds.x, maxBounds.y, maxBounds.z };
+    const std::array<float, 3> originValues{ origin.x, origin.y, origin.z };
+    const std::array<float, 3> directionValues{ direction.x, direction.y, direction.z };
+    const std::array<float, 3> minValues{ minBounds.x, minBounds.y, minBounds.z };
+    const std::array<float, 3> maxValues{ maxBounds.x, maxBounds.y, maxBounds.z };
 
-    for (int axis = 0; axis < 3; ++axis)
+    for (std::size_t axis = 0U; axis < originValues.size(); ++axis)
     {
         const float dir = directionValues[axis];
         if (bx::abs(dir) < INTERSECTION_EPSILON)
@@ -39,9 +52,7 @@ bool intersectRayAabb(const bx::Vec3 &origin, const bx::Vec3 &direction, const b
         float t1 = (maxValues[axis] - originValues[axis]) * invDir;
         if (t0 > t1)
         {
-            const float temp = t0;
-            t0 = t1;
-            t1 = temp;
+            std::swap(t0, t1);
         }
 
         tMin = bx::max(tMin, t0);
@@ -56,16 +67,7 @@ bool intersectRayAabb(const bx::Vec3 &origin, const bx::Vec3 &direction, const b
     return true;
 }
 
-bool projectToScreen(
-    const bx::Vec3 &worldPoint,
-    const bx::Vec3 &cameraPosition,
-    const bx::Vec3 &forward,
-    const bx::Vec3 &right,
-    const bx::Vec3 &up,
-    float viewportWidth,
-    float viewportHeight,
-    float &outX,
-    float &outY)
+bool projectToScreen(const bx::Vec3 &worldPoint, const bx::Vec3 &cameraPosition, const bx::Vec3 &forward, const bx::Vec3 &right, const bx::Vec3 &up, float viewportWidth, float viewportHeight, float &outX, float &outY)
 {
     /* Project a world-space point with the current camera basis into viewport pixel coordinates. */
     const bx::Vec3 toPoint = bx::sub(worldPoint, cameraPosition);
@@ -110,21 +112,6 @@ float pointSegmentDistanceSquared(float px, float py, float ax, float ay, float 
     return (dx * dx) + (dy * dy);
 }
 
-float edgeFunction(float ax, float ay, float bx, float by, float px, float py)
-{
-    return ((px - ax) * (by - ay)) - ((py - ay) * (bx - ax));
-}
-
-bool pointInTriangle2D(float px, float py, float ax, float ay, float bx, float by, float cx, float cy)
-{
-    const float e0 = edgeFunction(ax, ay, bx, by, px, py);
-    const float e1 = edgeFunction(bx, by, cx, cy, px, py);
-    const float e2 = edgeFunction(cx, cy, ax, ay, px, py);
-    const bool hasNeg = (e0 < 0.0F) || (e1 < 0.0F) || (e2 < 0.0F);
-    const bool hasPos = (e0 > 0.0F) || (e1 > 0.0F) || (e2 > 0.0F);
-    return !(hasNeg && hasPos);
-}
-
 bool intersectRayTriangle(
     const bx::Vec3 &origin,
     const bx::Vec3 &direction,
@@ -167,34 +154,37 @@ bool intersectRayTriangle(
     return true;
 }
 
-} // namespace
-
-namespace Scene
+struct PickContext
 {
+    bx::Vec3 cameraPosition{ 0.0F, 0.0F, 0.0F };
+    bx::Vec3 forward{ 0.0F, 0.0F, 0.0F };
+    bx::Vec3 right{ 0.0F, 0.0F, 0.0F };
+    bx::Vec3 up{ 0.0F, 0.0F, 0.0F };
+    bx::Vec3 rayDirection{ 0.0F, 0.0F, 0.0F };
+    float viewportWidth{};
+    float viewportHeight{};
+};
 
-std::optional<ObjectId> selectObjectFromScreen(
-    const Document &document,
-    const bx::Vec3 &cameraPosition,
-    float cameraYawRadians,
-    float cameraPitchRadians,
-    float mouseX,
-    float mouseY,
-    float viewportWidth,
-    float viewportHeight)
+struct TriangleHit
 {
-    if (viewportWidth <= 0.0F || viewportHeight <= 0.0F)
-    {
-        return std::nullopt;
-    }
+    uint16_t faceIndex{};
+    float t{};
+    std::array<uint16_t, 3> triangleVertexIndices{ 0U, 0U, 0U };
+};
 
-    const float ndcX = ((2.0F * mouseX) / viewportWidth) - 1.0F;
-    const float ndcY = 1.0F - ((2.0F * mouseY) / viewportHeight);
+struct EdgeCandidate
+{
+    uint16_t index{};
+    const Scene::Edge *edge{};
+};
 
-    const float cosPitch = bx::cos(cameraPitchRadians);
+PickContext buildPickContext(const Scene::CameraParameters &cameraParameters, const Scene::MousePosition &mousePosition, float viewportWidth, float viewportHeight)
+{
+    const float cosPitch = bx::cos(cameraParameters.pitchRadians);
     const bx::Vec3 forward(
-        bx::sin(cameraYawRadians) * cosPitch,
-        bx::sin(cameraPitchRadians),
-        bx::cos(cameraYawRadians) * cosPitch);
+        bx::sin(cameraParameters.yawRadians) * cosPitch,
+        bx::sin(cameraParameters.pitchRadians),
+        bx::cos(cameraParameters.yawRadians) * cosPitch);
 
     bx::Vec3 right = bx::cross(bx::Vec3{ 0.0F, 1.0F, 0.0F }, forward);
     const float rightLength = bx::length(right);
@@ -208,6 +198,8 @@ std::optional<ObjectId> selectObjectFromScreen(
     }
 
     const bx::Vec3 up = bx::normalize(bx::cross(forward, right));
+    const float ndcX = ((2.0F * mousePosition.x) / viewportWidth) - 1.0F;
+    const float ndcY = 1.0F - ((2.0F * mousePosition.y) / viewportHeight);
     const float aspect = viewportWidth / viewportHeight;
     const float tanHalfFov = bx::tan(bx::toRad(CAMERA_FOV_DEGREES) * 0.5F);
 
@@ -217,6 +209,256 @@ std::optional<ObjectId> selectObjectFromScreen(
             bx::mul(right, ndcX * aspect * tanHalfFov),
             bx::mul(up, ndcY * tanHalfFov)));
     rayDirection = bx::normalize(rayDirection);
+
+    return PickContext{
+        .cameraPosition = cameraParameters.position,
+        .forward = forward,
+        .right = right,
+        .up = up,
+        .rayDirection = rayDirection,
+        .viewportWidth = viewportWidth,
+        .viewportHeight = viewportHeight,
+    };
+}
+
+bool projectVertexToScreen(const Scene::EditableObject &object, uint16_t vertexIndex, const PickContext &pickContext, float &outX, float &outY)
+{
+    if (vertexIndex >= object.localVertices.size())
+    {
+        return false;
+    }
+
+    return projectToScreen(
+        bx::add(object.position, object.localVertices[vertexIndex]),
+        pickContext.cameraPosition,
+        pickContext.forward,
+        pickContext.right,
+        pickContext.up,
+        pickContext.viewportWidth,
+        pickContext.viewportHeight,
+        outX,
+        outY);
+}
+
+std::optional<TriangleHit> findNearestTriangleHit(const Scene::EditableObject &object, const bx::Vec3 &cameraPosition, const bx::Vec3 &rayDirection)
+{
+    std::optional<TriangleHit> bestHit;
+
+    for (const std::size_t faceIndex : std::views::iota(std::size_t{ 0U }, object.faces.size()))
+    {
+        const Scene::Face &face = object.faces[faceIndex];
+        Scene::forEachFaceTriangle(face, [&](const std::array<Scene::TopologyIndex, 3> &triangle)
+        {
+            const auto [i0, i1, i2] = triangle;
+            if (i0 >= object.localVertices.size()
+                || i1 >= object.localVertices.size()
+                || i2 >= object.localVertices.size())
+            {
+                return;
+            }
+
+            const bx::Vec3 w0 = bx::add(object.position, object.localVertices[i0]);
+            const bx::Vec3 w1 = bx::add(object.position, object.localVertices[i1]);
+            const bx::Vec3 w2 = bx::add(object.position, object.localVertices[i2]);
+            float t = 0.0F;
+            if (!intersectRayTriangle(cameraPosition, rayDirection, w0, w1, w2, t))
+            {
+                return;
+            }
+
+            if (bestHit.has_value() && t >= bestHit->t)
+            {
+                return;
+            }
+
+            bestHit = TriangleHit{
+                .faceIndex = static_cast<uint16_t>(faceIndex),
+                .t = t,
+                .triangleVertexIndices = { i0, i1, i2 },
+            };
+        });
+    }
+
+    return bestHit;
+}
+
+std::unordered_map<uint32_t, uint16_t> buildEdgeLookup(const Scene::EditableObject &object)
+{
+    std::unordered_map<uint32_t, uint16_t> edgeLookup;
+    edgeLookup.reserve(object.edges.size());
+    for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
+    {
+        if (edgeIndex > static_cast<std::size_t>(std::numeric_limits<uint16_t>::max()))
+        {
+            break;
+        }
+
+        const uint16_t e0 = object.edges[edgeIndex][0];
+        const uint16_t e1 = object.edges[edgeIndex][1];
+        edgeLookup[edgeKey(e0, e1)] = static_cast<uint16_t>(edgeIndex);
+    }
+
+    return edgeLookup;
+}
+
+std::optional<uint16_t> findEdgeIndexForVertices(const std::unordered_map<uint32_t, uint16_t> &edgeLookup, uint16_t a, uint16_t b)
+{
+    const auto found = edgeLookup.find(edgeKey(a, b));
+    if (found == edgeLookup.end())
+    {
+        return std::nullopt;
+    }
+
+    return found->second;
+}
+
+std::vector<EdgeCandidate> buildAllEdgeCandidates(const Scene::EditableObject &object)
+{
+    std::vector<EdgeCandidate> candidates;
+    candidates.reserve(object.edges.size());
+    for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
+    {
+        if (edgeIndex > static_cast<std::size_t>(std::numeric_limits<uint16_t>::max()))
+        {
+            break;
+        }
+
+        const Scene::Edge &edge = object.edges[edgeIndex];
+        candidates.push_back(EdgeCandidate{
+            .index = static_cast<uint16_t>(edgeIndex),
+            .edge = &edge,
+        });
+    }
+
+    return candidates;
+}
+
+std::vector<uint16_t> buildAllVertexIndices(const Scene::EditableObject &object)
+{
+    std::vector<uint16_t> vertices;
+    vertices.reserve(object.localVertices.size());
+    for (const std::size_t vertexIndex : std::views::iota(std::size_t{ 0U }, object.localVertices.size()))
+    {
+        if (vertexIndex > static_cast<std::size_t>(std::numeric_limits<uint16_t>::max()))
+        {
+            break;
+        }
+
+        vertices.push_back(static_cast<uint16_t>(vertexIndex));
+    }
+
+    return vertices;
+}
+
+void updateBestByDistance(std::optional<std::pair<float, uint16_t>> &best, float distSq, uint16_t index)
+{
+    if (!best.has_value() || distSq < best->first)
+    {
+        best = std::pair<float, uint16_t>{ distSq, index };
+    }
+}
+
+std::optional<uint16_t> pickNearestVertex(const Scene::EditableObject &object, std::span<const uint16_t> candidateVertices, const PickContext &pickContext, const Scene::MousePosition &mousePosition)
+{
+    std::optional<std::pair<float, uint16_t>> bestVertex;
+    const float pickRadiusSq = VERTEX_PICK_RADIUS_PIXELS * VERTEX_PICK_RADIUS_PIXELS;
+
+    const auto evaluateVertex = [&](uint16_t vertexIndex)
+    {
+        float sx = 0.0F;
+        float sy = 0.0F;
+        if (!projectVertexToScreen(object, vertexIndex, pickContext, sx, sy))
+        {
+            return;
+        }
+
+        const float dx = sx - mousePosition.x;
+        const float dy = sy - mousePosition.y;
+        const float distSq = (dx * dx) + (dy * dy);
+        if (distSq <= pickRadiusSq)
+        {
+            updateBestByDistance(bestVertex, distSq, vertexIndex);
+        }
+    };
+
+    if (candidateVertices.empty())
+    {
+        for (const uint16_t vertexIndex : buildAllVertexIndices(object))
+        {
+            evaluateVertex(vertexIndex);
+        }
+    }
+    else
+    {
+        for (const uint16_t vertexIndex : candidateVertices)
+        {
+            evaluateVertex(vertexIndex);
+        }
+    }
+
+    return bestVertex.has_value() ? std::optional<uint16_t>{ bestVertex->second } : std::nullopt;
+}
+
+std::optional<uint16_t> pickNearestEdge(const Scene::EditableObject &object, std::span<const EdgeCandidate> candidateEdges, const PickContext &pickContext, const Scene::MousePosition &mousePosition)
+{
+    std::optional<std::pair<float, uint16_t>> bestEdge;
+    const float pickRadiusSq = EDGE_PICK_RADIUS_PIXELS * EDGE_PICK_RADIUS_PIXELS;
+
+    const auto evaluateEdge = [&](const EdgeCandidate &candidate)
+    {
+        if (candidate.edge == nullptr)
+        {
+            return;
+        }
+
+        const Scene::Edge &edge = *candidate.edge;
+        float ax = 0.0F;
+        float ay = 0.0F;
+        float bx2 = 0.0F;
+        float by2 = 0.0F;
+        if (!projectVertexToScreen(object, edge[0], pickContext, ax, ay)
+            || !projectVertexToScreen(object, edge[1], pickContext, bx2, by2))
+        {
+            return;
+        }
+
+        const float distSq = pointSegmentDistanceSquared(mousePosition.x, mousePosition.y, ax, ay, bx2, by2);
+        if (distSq <= pickRadiusSq)
+        {
+            updateBestByDistance(bestEdge, distSq, candidate.index);
+        }
+    };
+
+    for (const EdgeCandidate &candidate : candidateEdges)
+    {
+        evaluateEdge(candidate);
+    }
+
+    return bestEdge.has_value() ? std::optional<uint16_t>{ bestEdge->second } : std::nullopt;
+}
+
+} // namespace
+
+namespace Scene
+{
+
+/**
+ * Performs screen-space ray selection against object bounds.
+ * @param[in] document Document containing selection candidates.
+ * @param[in] cameraParameters Camera position/orientation.
+ * @param[in] mousePosition Cursor position in pixels.
+ * @param[in] viewportWidth Viewport width in pixels.
+ * @param[in] viewportHeight Viewport height in pixels.
+ * @return Hit object id when an object is under the cursor, otherwise std::nullopt.
+ */
+std::optional<ObjectId> selectObjectFromScreen(const Document &document, const CameraParameters &cameraParameters, const MousePosition &mousePosition, float viewportWidth, float viewportHeight)
+{
+    if (viewportWidth <= 0.0F || viewportHeight <= 0.0F)
+    {
+        return std::nullopt;
+    }
+
+    const PickContext pickContext = buildPickContext(cameraParameters, mousePosition, viewportWidth, viewportHeight);
 
     float bestT = std::numeric_limits<float>::max();
     ObjectId bestId = 0U;
@@ -241,8 +483,8 @@ std::optional<ObjectId> selectObjectFromScreen(
             maxBounds.z = bx::max(maxBounds.z, worldVertex.z);
         }
 
-        float tHit = MISS_T;
-        if (intersectRayAabb(cameraPosition, rayDirection, minBounds, maxBounds, tHit) && tHit >= 0.0F && tHit < bestT)
+        float tHit = 0.0F;
+        if (intersectRayAabb(cameraParameters.position, pickContext.rayDirection, minBounds, maxBounds, tHit) && tHit >= 0.0F && tHit < bestT)
         {
             bestT = tHit;
             bestId = object.id;
@@ -257,238 +499,73 @@ std::optional<ObjectId> selectObjectFromScreen(
     return bestId;
 }
 
-std::optional<ComponentSelection> selectComponentFromScreen(
-    const EditableObject &object,
-    const bx::Vec3 &cameraPosition,
-    float cameraYawRadians,
-    float cameraPitchRadians,
-    float mouseX,
-    float mouseY,
-    float viewportWidth,
-    float viewportHeight)
+/**
+ * Performs component picking for one editable object using screen-space cursor position.
+ * @param[in] object Editable object to test.
+ * @param[in] cameraParameters Camera position/orientation.
+ * @param[in] mousePosition Cursor position in pixels.
+ * @param[in] viewportWidth Viewport width in pixels.
+ * @param[in] viewportHeight Viewport height in pixels.
+ * @return Hit component selection when found, otherwise std::nullopt.
+ */
+std::optional<ComponentSelection> selectComponentFromScreen(const EditableObject &object, const CameraParameters &cameraParameters, const MousePosition &mousePosition, float viewportWidth, float viewportHeight)
 {
     if (viewportWidth <= 0.0F || viewportHeight <= 0.0F || object.localVertices.empty())
     {
         return std::nullopt;
     }
 
-    const float cosPitch = bx::cos(cameraPitchRadians);
-    const bx::Vec3 forward(
-        bx::sin(cameraYawRadians) * cosPitch,
-        bx::sin(cameraPitchRadians),
-        bx::cos(cameraYawRadians) * cosPitch);
+    const PickContext pickContext = buildPickContext(cameraParameters, mousePosition, viewportWidth, viewportHeight);
+    const std::unordered_map<uint32_t, uint16_t> edgeLookup = buildEdgeLookup(object);
 
-    bx::Vec3 right = bx::cross(bx::Vec3{ 0.0F, 1.0F, 0.0F }, forward);
-    const float rightLength = bx::length(right);
-    if (rightLength < INTERSECTION_EPSILON)
+    const std::optional<TriangleHit> hit = findNearestTriangleHit(object, cameraParameters.position, pickContext.rayDirection);
+    if (hit.has_value())
     {
-        right = bx::Vec3{ 1.0F, 0.0F, 0.0F };
-    }
-    else
-    {
-        right = bx::mul(right, 1.0F / rightLength);
-    }
-    const bx::Vec3 up = bx::normalize(bx::cross(forward, right));
-    const float ndcX = ((2.0F * mouseX) / viewportWidth) - 1.0F;
-    const float ndcY = 1.0F - ((2.0F * mouseY) / viewportHeight);
-    const float aspect = viewportWidth / viewportHeight;
-    const float tanHalfFov = bx::tan(bx::toRad(CAMERA_FOV_DEGREES) * 0.5F);
-    bx::Vec3 rayDirection = bx::add(
-        forward,
-        bx::add(
-            bx::mul(right, ndcX * aspect * tanHalfFov),
-            bx::mul(up, ndcY * tanHalfFov)));
-    rayDirection = bx::normalize(rayDirection);
-
-    uint16_t hitFace = std::numeric_limits<uint16_t>::max();
-    float hitT = std::numeric_limits<float>::max();
-    std::array<uint16_t, 3> hitTriangleVertexIndices{ 0U, 0U, 0U };
-    for (std::size_t faceIndex = 0U; faceIndex < object.faces.size(); ++faceIndex)
-    {
-        const Face &face = object.faces[faceIndex];
-        if (face.size() < 3U)
+        if (const std::optional<uint16_t> bestVertex = pickNearestVertex(object, std::span<const uint16_t>(hit->triangleVertexIndices), pickContext, mousePosition); bestVertex.has_value())
         {
-            continue;
+            return ComponentSelection{ .type = ComponentType::Vertex, .index = *bestVertex };
         }
 
-        const uint16_t baseIndex = face[0];
-        if (baseIndex >= object.localVertices.size())
-        {
-            continue;
-        }
-
-        const bx::Vec3 w0 = bx::add(object.position, object.localVertices[baseIndex]);
-        for (std::size_t i = 1U; i + 1U < face.size(); ++i)
-        {
-            const uint16_t i1 = face[i];
-            const uint16_t i2 = face[i + 1U];
-            if (i1 >= object.localVertices.size() || i2 >= object.localVertices.size())
-            {
-                continue;
-            }
-
-            const bx::Vec3 w1 = bx::add(object.position, object.localVertices[i1]);
-            const bx::Vec3 w2 = bx::add(object.position, object.localVertices[i2]);
-            float t = 0.0F;
-            if (intersectRayTriangle(cameraPosition, rayDirection, w0, w1, w2, t) && t < hitT)
-            {
-                hitT = t;
-                hitFace = static_cast<uint16_t>(faceIndex);
-                hitTriangleVertexIndices = { baseIndex, i1, i2 };
-            }
-        }
-    }
-
-    std::unordered_map<uint32_t, uint16_t> edgeLookup;
-    edgeLookup.reserve(object.edges.size());
-    for (uint16_t edgeIndex = 0U; edgeIndex < object.edges.size(); ++edgeIndex)
-    {
-        const uint16_t a = object.edges[edgeIndex][0];
-        const uint16_t b = object.edges[edgeIndex][1];
-        const uint16_t lo = bx::min(a, b);
-        const uint16_t hi = bx::max(a, b);
-        const uint32_t key = (static_cast<uint32_t>(lo) << 16U) | static_cast<uint32_t>(hi);
-        edgeLookup[key] = edgeIndex;
-    }
-
-    if (hitFace != std::numeric_limits<uint16_t>::max())
-    {
-        float bestVertexDistSq = VERTEX_PICK_RADIUS_PIXELS * VERTEX_PICK_RADIUS_PIXELS;
-        uint16_t bestVertex = std::numeric_limits<uint16_t>::max();
-        for (const uint16_t vi : hitTriangleVertexIndices)
-        {
-            const bx::Vec3 worldVertex = bx::add(object.position, object.localVertices[vi]);
-            float sx = 0.0F;
-            float sy = 0.0F;
-            if (!projectToScreen(worldVertex, cameraPosition, forward, right, up, viewportWidth, viewportHeight, sx, sy))
-            {
-                continue;
-            }
-
-            const float dx = sx - mouseX;
-            const float dy = sy - mouseY;
-            const float distSq = (dx * dx) + (dy * dy);
-            if (distSq < bestVertexDistSq)
-            {
-                bestVertexDistSq = distSq;
-                bestVertex = vi;
-            }
-        }
-
-        if (bestVertex != std::numeric_limits<uint16_t>::max())
-        {
-            return ComponentSelection{ .type = ComponentType::Vertex, .index = bestVertex };
-        }
-
-        float bestEdgeDistSq = EDGE_PICK_RADIUS_PIXELS * EDGE_PICK_RADIUS_PIXELS;
-        uint16_t bestEdge = std::numeric_limits<uint16_t>::max();
         const std::array<std::array<uint16_t, 2>, 3> triEdges = {
-            std::array<uint16_t, 2>{ hitTriangleVertexIndices[0], hitTriangleVertexIndices[1] },
-            std::array<uint16_t, 2>{ hitTriangleVertexIndices[1], hitTriangleVertexIndices[2] },
-            std::array<uint16_t, 2>{ hitTriangleVertexIndices[2], hitTriangleVertexIndices[0] },
+            std::array<uint16_t, 2>{ hit->triangleVertexIndices[0], hit->triangleVertexIndices[1] },
+            std::array<uint16_t, 2>{ hit->triangleVertexIndices[1], hit->triangleVertexIndices[2] },
+            std::array<uint16_t, 2>{ hit->triangleVertexIndices[2], hit->triangleVertexIndices[0] },
         };
 
+        std::array<EdgeCandidate, 3> triangleEdgeCandidates{};
+        std::size_t triangleEdgeCount = 0U;
         for (const auto &triEdge : triEdges)
         {
-            float ax = 0.0F;
-            float ay = 0.0F;
-            float bx2 = 0.0F;
-            float by2 = 0.0F;
-            if (!projectToScreen(bx::add(object.position, object.localVertices[triEdge[0]]), cameraPosition, forward, right, up, viewportWidth, viewportHeight, ax, ay)
-                || !projectToScreen(bx::add(object.position, object.localVertices[triEdge[1]]), cameraPosition, forward, right, up, viewportWidth, viewportHeight, bx2, by2))
+            if (const auto edgeIndex = findEdgeIndexForVertices(edgeLookup, triEdge[0], triEdge[1]))
             {
-                continue;
+                triangleEdgeCandidates[triangleEdgeCount] = EdgeCandidate{
+                    .index = *edgeIndex,
+                    .edge = &object.edges[*edgeIndex],
+                };
+                ++triangleEdgeCount;
             }
-
-            const float distSq = pointSegmentDistanceSquared(mouseX, mouseY, ax, ay, bx2, by2);
-            if (distSq >= bestEdgeDistSq)
-            {
-                continue;
-            }
-
-            const uint16_t lo = bx::min(triEdge[0], triEdge[1]);
-            const uint16_t hi = bx::max(triEdge[0], triEdge[1]);
-            const uint32_t key = (static_cast<uint32_t>(lo) << 16U) | static_cast<uint32_t>(hi);
-            const auto it = edgeLookup.find(key);
-            if (it == edgeLookup.end())
-            {
-                continue;
-            }
-
-            bestEdgeDistSq = distSq;
-            bestEdge = it->second;
         }
 
-        if (bestEdge != std::numeric_limits<uint16_t>::max())
+        if (const std::optional<uint16_t> bestEdge = pickNearestEdge(object, std::span<const EdgeCandidate>(triangleEdgeCandidates.data(), triangleEdgeCount), pickContext, mousePosition); bestEdge.has_value())
         {
-            return ComponentSelection{ .type = ComponentType::Edge, .index = bestEdge };
+            return ComponentSelection{ .type = ComponentType::Edge, .index = *bestEdge };
         }
 
-        return ComponentSelection{ .type = ComponentType::Face, .index = hitFace };
+        return ComponentSelection{ .type = ComponentType::Face, .index = hit->faceIndex };
     }
-
-    float bestVertexDistSq = VERTEX_PICK_RADIUS_PIXELS * VERTEX_PICK_RADIUS_PIXELS;
-    uint16_t bestVertex = std::numeric_limits<uint16_t>::max();
 
     /* Vertex selection takes precedence over edges for precise component targeting. */
-    for (uint16_t i = 0U; i < object.localVertices.size(); ++i)
+    if (const std::optional<uint16_t> bestVertex = pickNearestVertex(object, std::span<const uint16_t>{}, pickContext, mousePosition); bestVertex.has_value())
     {
-        const bx::Vec3 worldVertex = bx::add(object.position, object.localVertices[i]);
-        float sx = 0.0F;
-        float sy = 0.0F;
-        if (!projectToScreen(worldVertex, cameraPosition, forward, right, up, viewportWidth, viewportHeight, sx, sy))
-        {
-            continue;
-        }
-
-        const float dx = sx - mouseX;
-        const float dy = sy - mouseY;
-        const float distSq = (dx * dx) + (dy * dy);
-        if (distSq < bestVertexDistSq)
-        {
-            bestVertexDistSq = distSq;
-            bestVertex = i;
-        }
+        return ComponentSelection{ .type = ComponentType::Vertex, .index = *bestVertex };
     }
-
-    if (bestVertex != std::numeric_limits<uint16_t>::max())
-    {
-        return ComponentSelection{ .type = ComponentType::Vertex, .index = bestVertex };
-    }
-
-    float bestEdgeDistSq = EDGE_PICK_RADIUS_PIXELS * EDGE_PICK_RADIUS_PIXELS;
-    uint16_t bestEdge = std::numeric_limits<uint16_t>::max();
 
     /* Edge selection uses shortest screen-space distance to the projected edge segment. */
-    for (uint16_t edgeIndex = 0U; edgeIndex < object.edges.size(); ++edgeIndex)
+    const std::vector<EdgeCandidate> allEdgeCandidates = buildAllEdgeCandidates(object);
+
+    if (const std::optional<uint16_t> bestEdge = pickNearestEdge(object, allEdgeCandidates, pickContext, mousePosition); bestEdge.has_value())
     {
-        const auto &edge = object.edges[edgeIndex];
-        if (edge[0] >= object.localVertices.size() || edge[1] >= object.localVertices.size())
-        {
-            continue;
-        }
-
-        float ax = 0.0F;
-        float ay = 0.0F;
-        float bx2 = 0.0F;
-        float by2 = 0.0F;
-        if (!projectToScreen(bx::add(object.position, object.localVertices[edge[0]]), cameraPosition, forward, right, up, viewportWidth, viewportHeight, ax, ay)
-            || !projectToScreen(bx::add(object.position, object.localVertices[edge[1]]), cameraPosition, forward, right, up, viewportWidth, viewportHeight, bx2, by2))
-        {
-            continue;
-        }
-
-        const float distSq = pointSegmentDistanceSquared(mouseX, mouseY, ax, ay, bx2, by2);
-        if (distSq < bestEdgeDistSq)
-        {
-            bestEdgeDistSq = distSq;
-            bestEdge = edgeIndex;
-        }
-    }
-
-    if (bestEdge != std::numeric_limits<uint16_t>::max())
-    {
-        return ComponentSelection{ .type = ComponentType::Edge, .index = bestEdge };
+        return ComponentSelection{ .type = ComponentType::Edge, .index = *bestEdge };
     }
 
     return std::nullopt;

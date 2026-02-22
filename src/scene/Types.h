@@ -13,6 +13,19 @@ using TopologyIndex = uint16_t;
 using Edge = std::array<TopologyIndex, 2>;
 using Face = std::vector<TopologyIndex>;
 
+struct MousePosition
+{
+    float x{};
+    float y{};
+};
+
+struct CameraParameters
+{
+    bx::Vec3 position{ 0.0F, 0.0F, 0.0F };
+    float yawRadians{};
+    float pitchRadians{};
+};
+
 /**
  * Packed vertex layout uploaded to bgfx dynamic buffers.
  */

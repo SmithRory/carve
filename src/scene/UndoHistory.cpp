@@ -5,12 +5,21 @@
 namespace Scene
 {
 
+/**
+ * Records a command whose effect has already been applied.
+ * @param[in] command Command to push onto undo stack.
+ */
 void UndoHistory::recordApplied(EditCommand command)
 {
     mUndoStack.push_back(std::move(command));
     mRedoStack.clear();
 }
 
+/**
+ * Pops one command from undo stack.
+ * @param[out] outCommand Popped undo command.
+ * @return True when a command was available.
+ */
 bool UndoHistory::popUndo(EditCommand &outCommand)
 {
     if (mUndoStack.empty())
@@ -23,6 +32,11 @@ bool UndoHistory::popUndo(EditCommand &outCommand)
     return true;
 }
 
+/**
+ * Pops one command from redo stack.
+ * @param[out] outCommand Popped redo command.
+ * @return True when a command was available.
+ */
 bool UndoHistory::popRedo(EditCommand &outCommand)
 {
     if (mRedoStack.empty())
@@ -35,11 +49,19 @@ bool UndoHistory::popRedo(EditCommand &outCommand)
     return true;
 }
 
+/**
+ * Pushes a command onto redo stack.
+ * @param[in] command Command to push.
+ */
 void UndoHistory::pushRedo(EditCommand command)
 {
     mRedoStack.push_back(std::move(command));
 }
 
+/**
+ * Pushes a command onto undo stack.
+ * @param[in] command Command to push.
+ */
 void UndoHistory::pushUndo(EditCommand command)
 {
     mUndoStack.push_back(std::move(command));

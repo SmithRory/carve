@@ -486,13 +486,13 @@ void RenderBridge::render(const Scene::RenderSnapshot &sceneSnapshot)
         eye.z + (bx::cos(sceneSnapshot.cameraYawRadians) * cosPitch),
     };
 
-    float view[MATRIX_ELEMENT_COUNT];
-    bx::mtxLookAt(view, eye, at);
+    std::array<float, MATRIX_ELEMENT_COUNT> view{};
+    bx::mtxLookAt(view.data(), eye, at);
 
-    float proj[MATRIX_ELEMENT_COUNT];
+    std::array<float, MATRIX_ELEMENT_COUNT> proj{};
     const float aspect = static_cast<float>(mWidth) / static_cast<float>(mHeight);
-    bx::mtxProj(proj, CAMERA_FOV_DEGREES, aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE, bgfx::getCaps()->homogeneousDepth);
-    bgfx::setViewTransform(MAIN_VIEW_ID, view, proj);
+    bx::mtxProj(proj.data(), CAMERA_FOV_DEGREES, aspect, CAMERA_NEAR_PLANE, CAMERA_FAR_PLANE, bgfx::getCaps()->homogeneousDepth);
+    bgfx::setViewTransform(MAIN_VIEW_ID, view.data(), proj.data());
     bgfx::setViewRect(MAIN_VIEW_ID, VIEW_ORIGIN_X, VIEW_ORIGIN_Y, mWidth, mHeight);
     bgfx::touch(MAIN_VIEW_ID);
 
@@ -507,10 +507,10 @@ void RenderBridge::render(const Scene::RenderSnapshot &sceneSnapshot)
         && mActiveVertexCount > ZERO_COUNT
         && mActiveIndexCount > ZERO_COUNT)
     {
-        float transform[MATRIX_ELEMENT_COUNT];
-        bx::mtxIdentity(transform);
+        std::array<float, MATRIX_ELEMENT_COUNT> transform{};
+        bx::mtxIdentity(transform.data());
 
-        bgfx::setTransform(transform);
+        bgfx::setTransform(transform.data());
         updateViewportUniforms(sceneSnapshot);
         bgfx::setUniform(mUniformParams, mIblParams.data(), static_cast<uint16_t>(mIblParams.size()));
         bgfx::setTexture(TEXTURE_STAGE_RADIANCE, mSamplerRadiance, mRadianceTexture);
@@ -528,9 +528,9 @@ void RenderBridge::render(const Scene::RenderSnapshot &sceneSnapshot)
         && mActiveSelectionOverlayVertexCount > ZERO_COUNT
         && mActiveSelectionOverlayEdgeIndexCount > ZERO_COUNT)
     {
-        float transform[MATRIX_ELEMENT_COUNT];
-        bx::mtxIdentity(transform);
-        bgfx::setTransform(transform);
+        std::array<float, MATRIX_ELEMENT_COUNT> transform{};
+        bx::mtxIdentity(transform.data());
+        bgfx::setTransform(transform.data());
         bgfx::setVertexBuffer(VERTEX_STREAM_MAIN, mSelectionOverlayVertexBuffer, BUFFER_START_OFFSET, mActiveSelectionOverlayVertexCount);
         bgfx::setIndexBuffer(mSelectionOverlayEdgeIndexBuffer, BUFFER_START_OFFSET, mActiveSelectionOverlayEdgeIndexCount);
         bgfx::setState(

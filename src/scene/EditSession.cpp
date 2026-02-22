@@ -2,6 +2,7 @@
 
 #include <bx/math.h>
 #include <limits>
+#include <ranges>
 
 namespace
 {
@@ -19,6 +20,11 @@ constexpr float TRANSLATE_CHANGE_EPSILON = 0.00001F;
 namespace Scene
 {
 
+/**
+ * Starts an extrusion drag on the selected object.
+ * @param[in] document Current document state.
+ * @param[in] mouseY Cursor y position in pixels.
+ */
 void EditSession::beginExtrude(const Document &document, float mouseY)
 {
     const EditableObject *object = document.selectedObject();
@@ -48,12 +54,13 @@ void EditSession::beginExtrude(const Document &document, float mouseY)
 
     const std::size_t maxTopologyIndex = static_cast<std::size_t>(std::numeric_limits<uint16_t>::max());
     const std::size_t vertexCount = bx::min(object->localVertices.size(), maxTopologyIndex + 1U);
-    for (std::size_t i = 0U; i < vertexCount; ++i)
+    for (const std::size_t i : std::views::iota(std::size_t{ 0U }, vertexCount))
     {
-        if (bx::abs(object->localVertices[i].y - maxY) <= TOP_VERTEX_EPSILON)
+        const bx::Vec3 &vertex = object->localVertices[i];
+        if (bx::abs(vertex.y - maxY) <= TOP_VERTEX_EPSILON)
         {
             mExtrudeDrag.vertexIndices.push_back(static_cast<uint16_t>(i));
-            mExtrudeDrag.beforeY.push_back(object->localVertices[i].y);
+            mExtrudeDrag.beforeY.push_back(vertex.y);
         }
     }
 
@@ -63,6 +70,12 @@ void EditSession::beginExtrude(const Document &document, float mouseY)
     }
 }
 
+/**
+ * Applies one extrusion drag update. Returns true when object changed.
+ * @param[in,out] document Mutable document state.
+ * @param[in] mouseY Cursor y position in pixels.
+ * @return True when extrusion changed object state.
+ */
 bool EditSession::updateExtrude(Document &document, float mouseY)
 {
     if (!mExtrudeDrag.active)
@@ -108,6 +121,11 @@ bool EditSession::updateExtrude(Document &document, float mouseY)
     return changed;
 }
 
+/**
+ * Ends extrusion drag and returns a command when changed.
+ * @param[in] document Current document state.
+ * @return Undo command when extrusion changed object state.
+ */
 std::optional<EditCommand> EditSession::endExtrude(const Document &document)
 {
     if (!mExtrudeDrag.active)
@@ -122,9 +140,11 @@ std::optional<EditCommand> EditSession::endExtrude(const Document &document)
         std::vector<float> afterY;
         afterY.reserve(mExtrudeDrag.vertexIndices.size());
         bool changed = false;
-        for (std::size_t i = 0U; i < mExtrudeDrag.vertexIndices.size(); ++i)
+        const std::size_t pairedCount = bx::min(mExtrudeDrag.vertexIndices.size(), mExtrudeDrag.beforeY.size());
+        for (const std::size_t idx : std::views::iota(std::size_t{ 0U }, pairedCount))
         {
-            const uint16_t vertexIndex = mExtrudeDrag.vertexIndices[i];
+            const uint16_t vertexIndex = mExtrudeDrag.vertexIndices[idx];
+            const float beforeY = mExtrudeDrag.beforeY[idx];
             if (vertexIndex >= object->localVertices.size())
             {
                 continue;
@@ -132,7 +152,7 @@ std::optional<EditCommand> EditSession::endExtrude(const Document &document)
 
             const float value = object->localVertices[vertexIndex].y;
             afterY.push_back(value);
-            changed = changed || (bx::abs(value - mExtrudeDrag.beforeY[i]) > EXTRUDE_CHANGE_EPSILON);
+            changed = changed || (bx::abs(value - beforeY) > EXTRUDE_CHANGE_EPSILON);
         }
 
         if (changed && afterY.size() == mExtrudeDrag.beforeY.size())
@@ -150,7 +170,12 @@ std::optional<EditCommand> EditSession::endExtrude(const Document &document)
     return command;
 }
 
-void EditSession::beginTranslate(const Document &document, float mouseX, float mouseY)
+/**
+ * Starts a translation drag on the selected object.
+ * @param[in] document Current document state.
+ * @param[in] mousePosition Cursor position in pixels.
+ */
+void EditSession::beginTranslate(const Document &document, const MousePosition &mousePosition)
 {
     const EditableObject *object = document.selectedObject();
     if (object == nullptr)
@@ -161,11 +186,18 @@ void EditSession::beginTranslate(const Document &document, float mouseX, float m
     mTranslateDrag.active = true;
     mTranslateDrag.objectId = object->id;
     mTranslateDrag.beforePosition = object->position;
-    mTranslateDrag.previousMouseX = mouseX;
-    mTranslateDrag.previousMouseY = mouseY;
+    mTranslateDrag.previousMouseX = mousePosition.x;
+    mTranslateDrag.previousMouseY = mousePosition.y;
 }
 
-bool EditSession::updateTranslate(Document &document, float cameraYawRadians, float mouseX, float mouseY)
+/**
+ * Applies one translation drag update. Returns true when object changed.
+ * @param[in,out] document Mutable document state.
+ * @param[in] cameraYawRadians Camera yaw in radians.
+ * @param[in] mousePosition Cursor position in pixels.
+ * @return True when translation changed object state.
+ */
+bool EditSession::updateTranslate(Document &document, float cameraYawRadians, const MousePosition &mousePosition)
 {
     if (!mTranslateDrag.active)
     {
@@ -179,10 +211,10 @@ bool EditSession::updateTranslate(Document &document, float cameraYawRadians, fl
         return false;
     }
 
-    const float deltaX = mouseX - mTranslateDrag.previousMouseX;
-    const float deltaY = mouseY - mTranslateDrag.previousMouseY;
-    mTranslateDrag.previousMouseX = mouseX;
-    mTranslateDrag.previousMouseY = mouseY;
+    const float deltaX = mousePosition.x - mTranslateDrag.previousMouseX;
+    const float deltaY = mousePosition.y - mTranslateDrag.previousMouseY;
+    mTranslateDrag.previousMouseX = mousePosition.x;
+    mTranslateDrag.previousMouseY = mousePosition.y;
     if (bx::abs(deltaX) < PIXEL_DEADZONE && bx::abs(deltaY) < PIXEL_DEADZONE)
     {
         return false;
@@ -203,6 +235,11 @@ bool EditSession::updateTranslate(Document &document, float cameraYawRadians, fl
     return true;
 }
 
+/**
+ * Ends translation drag and returns a command when changed.
+ * @param[in] document Current document state.
+ * @return Undo command when translation changed object state.
+ */
 std::optional<EditCommand> EditSession::endTranslate(const Document &document)
 {
     if (!mTranslateDrag.active)
@@ -229,6 +266,9 @@ std::optional<EditCommand> EditSession::endTranslate(const Document &document)
     return command;
 }
 
+/**
+ * Cancels all active drag interactions.
+ */
 void EditSession::cancel()
 {
     mExtrudeDrag = ExtrudeDrag{};

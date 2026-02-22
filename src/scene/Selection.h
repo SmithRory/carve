@@ -3,6 +3,7 @@
 #include <optional>
 
 #include "scene/Document.h"
+#include "scene/Types.h"
 
 namespace Scene
 {
@@ -19,35 +20,17 @@ struct ComponentSelection
     uint16_t index{};
 };
 
-/**
- * Performs screen-space ray selection against object bounds.
- * @param[in] document Document containing selection candidates.
- * @param[in] cameraPosition Camera position in world space.
- * @param[in] cameraYawRadians Camera yaw in radians.
- * @param[in] cameraPitchRadians Camera pitch in radians.
- * @param[in] mouseX Cursor x position in pixels.
- * @param[in] mouseY Cursor y position in pixels.
- * @param[in] viewportWidth Viewport width in pixels.
- * @param[in] viewportHeight Viewport height in pixels.
- * @return Hit object id when an object is under the cursor, otherwise std::nullopt.
- */
 std::optional<ObjectId> selectObjectFromScreen(
     const Document &document,
-    const bx::Vec3 &cameraPosition,
-    float cameraYawRadians,
-    float cameraPitchRadians,
-    float mouseX,
-    float mouseY,
+    const CameraParameters &cameraParameters,
+    const MousePosition &mousePosition,
     float viewportWidth,
     float viewportHeight);
 
 std::optional<ComponentSelection> selectComponentFromScreen(
     const EditableObject &object,
-    const bx::Vec3 &cameraPosition,
-    float cameraYawRadians,
-    float cameraPitchRadians,
-    float mouseX,
-    float mouseY,
+    const CameraParameters &cameraParameters,
+    const MousePosition &mousePosition,
     float viewportWidth,
     float viewportHeight);
 

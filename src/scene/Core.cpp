@@ -1,5 +1,6 @@
 #include "Core.h"
 
+#include <algorithm>
 #include <bx/math.h>
 #include <array>
 #include <optional>
@@ -97,6 +98,9 @@ std::vector<Scene::TopologyIndex> selectionIndicesToVector(const std::unordered_
 namespace Scene
 {
 
+/**
+ * Initializes high-level scene systems and default camera/build state.
+ */
 Core::Core()
     : mCamera({
           .position = bx::Vec3{ DEFAULT_CAMERA_X, DEFAULT_CAMERA_Y, DEFAULT_CAMERA_Z },
@@ -115,6 +119,9 @@ Core::Core()
 {
 }
 
+/**
+ * Creates a cube in front of the camera and records undo state.
+ */
 void Core::createCubeInFrontOfCamera()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -131,6 +138,9 @@ void Core::createCubeInFrontOfCamera()
     }
 }
 
+/**
+ * Deletes the selected object and records undo state.
+ */
 void Core::deleteSelectedObject()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -140,15 +150,9 @@ void Core::deleteSelectedObject()
         return;
     }
 
-    std::size_t index = 0U;
-    for (const EditableObject &object : mDocument.objects())
-    {
-        if (object.id == selected->id)
-        {
-            break;
-        }
-        ++index;
-    }
+    const auto &objects = mDocument.objects();
+    const auto found = std::ranges::find_if(objects, [selected](const EditableObject &object) { return object.id == selected->id; });
+    const std::size_t index = static_cast<std::size_t>(std::distance(objects.begin(), found));
 
     const EditCommand command = DeleteObjectCommand{
         .object = *selected,
@@ -162,6 +166,9 @@ void Core::deleteSelectedObject()
     }
 }
 
+/**
+ * Cycles selection to the next object.
+ */
 void Core::selectNextObject()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -171,35 +178,61 @@ void Core::selectNextObject()
     }
 }
 
-bool Core::selectObjectAtScreen(float mouseX, float mouseY, float viewportWidth, float viewportHeight)
+/**
+ * Selects an object from screen coordinates.
+ * @param[in] mousePosition Cursor position in pixels.
+ * @param[in] viewportWidth Viewport width in pixels.
+ * @param[in] viewportHeight Viewport height in pixels.
+ * @return True when an object was hit.
+ */
+bool Core::selectObjectAtScreen(const MousePosition &mousePosition, float viewportWidth, float viewportHeight)
 {
-    return selectObjectAtScreen(mouseX, mouseY, viewportWidth, viewportHeight, false);
+    return selectObjectAtScreen(mousePosition, viewportWidth, viewportHeight, false);
 }
 
-std::optional<ObjectId> Core::selectObjectIdAtScreen(float mouseX, float mouseY, float viewportWidth, float viewportHeight) const
+/**
+ * Selects an object id from screen coordinates.
+ * @param[in] mousePosition Cursor position in pixels.
+ * @param[in] viewportWidth Viewport width in pixels.
+ * @param[in] viewportHeight Viewport height in pixels.
+ * @return Selected object id, or std::nullopt when no hit.
+ */
+std::optional<ObjectId> Core::selectObjectIdAtScreen(const MousePosition &mousePosition, float viewportWidth, float viewportHeight) const
 {
     std::lock_guard<std::mutex> lock(mMutex);
+    const CameraParameters cameraParameters{
+        .position = mCamera.position,
+        .yawRadians = mCamera.yawRadians,
+        .pitchRadians = mCamera.pitchRadians,
+    };
     return selectObjectFromScreen(
         mDocument,
-        mCamera.position,
-        mCamera.yawRadians,
-        mCamera.pitchRadians,
-        mouseX,
-        mouseY,
+        cameraParameters,
+        mousePosition,
         viewportWidth,
         viewportHeight);
 }
 
-bool Core::selectObjectAtScreen(float mouseX, float mouseY, float viewportWidth, float viewportHeight, bool additiveSelection)
+/**
+ * Selects with optional additive behavior.
+ * @param[in] mousePosition Cursor position in pixels.
+ * @param[in] viewportWidth Viewport width in pixels.
+ * @param[in] viewportHeight Viewport height in pixels.
+ * @param[in] additiveSelection True to keep existing selected objects.
+ * @return True when an object was hit.
+ */
+bool Core::selectObjectAtScreen(const MousePosition &mousePosition, float viewportWidth, float viewportHeight, bool additiveSelection)
 {
     std::lock_guard<std::mutex> lock(mMutex);
+    const CameraParameters cameraParameters{
+        .position = mCamera.position,
+        .yawRadians = mCamera.yawRadians,
+        .pitchRadians = mCamera.pitchRadians,
+    };
     const std::optional<ObjectId> selectedId = selectObjectFromScreen(
         mDocument,
-        mCamera.position,
-        mCamera.yawRadians,
-        mCamera.pitchRadians,
-        mouseX,
-        mouseY,
+        cameraParameters,
+        mousePosition,
         viewportWidth,
         viewportHeight);
 
@@ -221,7 +254,7 @@ bool Core::selectObjectAtScreen(float mouseX, float mouseY, float viewportWidth,
     return selectedId.has_value();
 }
 
-bool Core::selectComponentAtScreen(float mouseX, float mouseY, float viewportWidth, float viewportHeight, bool additiveSelection)
+bool Core::selectComponentAtScreen(const MousePosition &mousePosition, float viewportWidth, float viewportHeight, bool additiveSelection)
 {
     std::lock_guard<std::mutex> lock(mMutex);
     const ObjectId selectedId = mDocument.selectedObjectId();
@@ -236,13 +269,15 @@ bool Core::selectComponentAtScreen(float mouseX, float mouseY, float viewportWid
         return false;
     }
 
+    const CameraParameters cameraParameters{
+        .position = mCamera.position,
+        .yawRadians = mCamera.yawRadians,
+        .pitchRadians = mCamera.pitchRadians,
+    };
     const std::optional<ComponentSelection> componentSelection = selectComponentFromScreen(
         *selectedObject,
-        mCamera.position,
-        mCamera.yawRadians,
-        mCamera.pitchRadians,
-        mouseX,
-        mouseY,
+        cameraParameters,
+        mousePosition,
         viewportWidth,
         viewportHeight);
 
@@ -277,6 +312,10 @@ bool Core::selectComponentAtScreen(float mouseX, float mouseY, float viewportWid
     return componentSelection.has_value();
 }
 
+/**
+ * Clears all selected objects.
+ * @return True when selection changed.
+ */
 bool Core::clearSelection()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -289,12 +328,21 @@ bool Core::clearSelection()
     return true;
 }
 
+/**
+ * Returns true when object id is selected.
+ * @param[in] id Object id to test.
+ * @return True when selected.
+ */
 bool Core::isObjectSelected(ObjectId id) const
 {
     std::lock_guard<std::mutex> lock(mMutex);
     return mDocument.isObjectSelected(id);
 }
 
+/**
+ * Reverts the last committed edit command.
+ * @return True when a command was undone.
+ */
 bool Core::undo()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -313,6 +361,10 @@ bool Core::undo()
     return true;
 }
 
+/**
+ * Reapplies the last reverted edit command.
+ * @return True when a command was redone.
+ */
 bool Core::redo()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -331,12 +383,20 @@ bool Core::redo()
     return true;
 }
 
+/**
+ * Starts extrusion drag interaction on selected object.
+ * @param[in] mouseY Cursor y position in pixels.
+ */
 void Core::beginExtrudeEdit(float mouseY)
 {
     std::lock_guard<std::mutex> lock(mMutex);
     mEditSession.beginExtrude(mDocument, mouseY);
 }
 
+/**
+ * Applies one extrusion drag step.
+ * @param[in] mouseY Cursor y position in pixels.
+ */
 void Core::updateExtrudeEdit(float mouseY)
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -346,6 +406,9 @@ void Core::updateExtrudeEdit(float mouseY)
     }
 }
 
+/**
+ * Ends extrusion drag and commits one undo command when changed.
+ */
 void Core::endExtrudeEdit()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -356,21 +419,32 @@ void Core::endExtrudeEdit()
     }
 }
 
-void Core::beginTranslateEdit(float mouseX, float mouseY)
+/**
+ * Starts translation drag interaction on selected object.
+ * @param[in] mousePosition Cursor position in pixels.
+ */
+void Core::beginTranslateEdit(const MousePosition &mousePosition)
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    mEditSession.beginTranslate(mDocument, mouseX, mouseY);
+    mEditSession.beginTranslate(mDocument, mousePosition);
 }
 
-void Core::updateTranslateEdit(float mouseX, float mouseY)
+/**
+ * Applies one translation drag step.
+ * @param[in] mousePosition Cursor position in pixels.
+ */
+void Core::updateTranslateEdit(const MousePosition &mousePosition)
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    if (mEditSession.updateTranslate(mDocument, mCamera.yawRadians, mouseX, mouseY))
+    if (mEditSession.updateTranslate(mDocument, mCamera.yawRadians, mousePosition))
     {
         markMeshDirtyLocked();
     }
 }
 
+/**
+ * Ends translation drag and commits one undo command when changed.
+ */
 void Core::endTranslateEdit()
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -381,12 +455,22 @@ void Core::endTranslateEdit()
     }
 }
 
+/**
+ * Toggles one camera movement direction.
+ * @param[in] move Camera movement direction.
+ * @param[in] active True while pressed, false when released.
+ */
 void Core::setCameraMoveState(CameraMove move, bool active)
 {
     std::lock_guard<std::mutex> lock(mMutex);
     mCamera.moveActive[static_cast<std::size_t>(move)] = active;
 }
 
+/**
+ * Applies mouse-look deltas to camera yaw/pitch.
+ * @param[in] deltaX Horizontal mouse delta in pixels.
+ * @param[in] deltaY Vertical mouse delta in pixels.
+ */
 void Core::addCameraLookDelta(float deltaX, float deltaY)
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -395,6 +479,10 @@ void Core::addCameraLookDelta(float deltaX, float deltaY)
     mCamera.pitchRadians = bx::clamp(mCamera.pitchRadians - (deltaY * LOOK_SENSITIVITY), -PITCH_LIMIT_RADIANS, PITCH_LIMIT_RADIANS);
 }
 
+/**
+ * Advances camera transform based on active movement state.
+ * @param[in] dtSeconds Frame delta time in seconds.
+ */
 void Core::tickCamera(float dtSeconds)
 {
     if (dtSeconds <= ZERO_SECONDS)
@@ -436,6 +524,11 @@ void Core::tickCamera(float dtSeconds)
     mCamera.position = bx::add(mCamera.position, bx::mul(velocityDirection, MOVE_SPEED_UNITS_PER_SECOND * dtSeconds));
 }
 
+/**
+ * Emits an immutable build ticket when scene mesh is dirty.
+ * @param[out] outTicket Build ticket to be consumed by the worker.
+ * @return True when a build should start.
+ */
 bool Core::tryStartBuild(BuildTicket &outTicket)
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -470,11 +563,20 @@ bool Core::tryStartBuild(BuildTicket &outTicket)
     return true;
 }
 
+/**
+ * Builds mesh payload from a build ticket.
+ * @param[in] ticket Immutable build input payload.
+ * @return Built mesh data tagged with ticket revision.
+ */
 BuiltMeshData Core::buildRenderMesh(const BuildTicket &ticket)
 {
     return buildMeshFromTicket(ticket);
 }
 
+/**
+ * Publishes finished build data for rendering.
+ * @param[in] built Built mesh payload from worker thread.
+ */
 void Core::finishBuild(BuiltMeshData built)
 {
     std::lock_guard<std::mutex> lock(mMutex);
@@ -492,6 +594,10 @@ void Core::finishBuild(BuiltMeshData built)
     }
 }
 
+/**
+ * Returns a thread-safe snapshot for renderer consumption.
+ * @return Snapshot with camera and mesh state.
+ */
 RenderSnapshot Core::snapshot() const
 {
     std::lock_guard<std::mutex> lock(mMutex);
