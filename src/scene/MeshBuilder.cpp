@@ -48,16 +48,14 @@ uint32_t packNormal(const bx::Vec3 &normal)
     return packed;
 }
 
-struct SphereTemplate
-{
+struct SphereTemplate {
     std::array<std::array<float, 3>, SPHERE_VERTEX_COUNT> unitVertices{};
     std::array<uint16_t, SPHERE_INDEX_COUNT> indices{};
 };
 
 const SphereTemplate &getSphereTemplate()
 {
-    static const SphereTemplate templateData = []
-    {
+    static const SphereTemplate templateData = [] {
         SphereTemplate sphere{};
 
         uint16_t vertexCursor = 0U;
@@ -80,11 +78,11 @@ const SphereTemplate &getSphereTemplate()
         {
             for (uint16_t segment = 0U; segment < SPHERE_SEGMENT_COUNT; ++segment)
             {
-                const uint16_t nextSegment = static_cast<uint16_t>((segment + 1U) % SPHERE_SEGMENT_COUNT);
-                const uint16_t i0 = static_cast<uint16_t>((ring * SPHERE_SEGMENT_COUNT) + segment);
-                const uint16_t i1 = static_cast<uint16_t>((ring * SPHERE_SEGMENT_COUNT) + nextSegment);
-                const uint16_t i2 = static_cast<uint16_t>(((ring + 1U) * SPHERE_SEGMENT_COUNT) + segment);
-                const uint16_t i3 = static_cast<uint16_t>(((ring + 1U) * SPHERE_SEGMENT_COUNT) + nextSegment);
+                const auto nextSegment = static_cast<uint16_t>((segment + 1U) % SPHERE_SEGMENT_COUNT);
+                const auto i0 = static_cast<uint16_t>((ring * SPHERE_SEGMENT_COUNT) + segment);
+                const auto i1 = static_cast<uint16_t>((ring * SPHERE_SEGMENT_COUNT) + nextSegment);
+                const auto i2 = static_cast<uint16_t>(((ring + 1U) * SPHERE_SEGMENT_COUNT) + segment);
+                const auto i3 = static_cast<uint16_t>(((ring + 1U) * SPHERE_SEGMENT_COUNT) + nextSegment);
 
                 sphere.indices[indexCursor++] = i0;
                 sphere.indices[indexCursor++] = i2;
@@ -128,8 +126,7 @@ void appendMeshTriangles(Scene::BuiltMeshData &built, const Scene::BuildObject &
     for (const std::size_t faceIndex : std::views::iota(std::size_t{ 0U }, object.faces.size()))
     {
         const Scene::Face &face = object.faces[faceIndex];
-        Scene::forEachFaceTriangle(face, [&](const std::array<Scene::TopologyIndex, 3> &triangle)
-        {
+        Scene::forEachFaceTriangle(face, [&](const std::array<Scene::TopologyIndex, 3> &triangle) {
             const auto [i0, i1, i2] = triangle;
             if (i0 >= object.localVertices.size()
                 || i1 >= object.localVertices.size()
@@ -153,8 +150,8 @@ void appendMeshTriangles(Scene::BuiltMeshData &built, const Scene::BuildObject &
             /* Emit non-index-shared triangle vertices so each face can keep a flat normal. */
             normal = bx::normalize(normal);
 
-            const uint16_t base = static_cast<uint16_t>(built.vertices.size());
-            const uint32_t color = selectedFaces.find(static_cast<Scene::TopologyIndex>(faceIndex)) != selectedFaces.end()
+            const auto base = static_cast<uint16_t>(built.vertices.size());
+            const uint32_t color = selectedFaces.contains(static_cast<Scene::TopologyIndex>(faceIndex))
                                        ? SELECTED_FACE_COLOR_ABGR
                                        : objectColor;
             const uint32_t packedNormal = packNormal(normal);
@@ -213,8 +210,7 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
         object.selectedEdgeIndices.begin(),
         object.selectedEdgeIndices.end());
 
-    auto appendPrismVertex = [&built](const bx::Vec3 &point, uint32_t colorAbgr)
-    {
+    auto appendPrismVertex = [&built](const bx::Vec3 &point, uint32_t colorAbgr) {
         built.selectionOverlayEdgeVertices.push_back(Scene::PackedVertex{
             .x = point.x,
             .y = point.y,
@@ -226,6 +222,7 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
         });
     };
 
+    // clang-format off
     /* Local index topology for one 8-vertex edge prism primitive; independent of object topology. */
     static constexpr std::array<uint16_t, EDGE_PRISM_INDEX_COUNT> PRISM_INDICES = {
         0, 1, 2, 1, 3, 2,
@@ -235,16 +232,17 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
         3, 7, 2, 2, 7, 6,
         2, 6, 0, 0, 6, 4,
     };
+    // clang-format on
 
     for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
         const Scene::Edge &edge = object.edges[edgeIndex];
-        const uint32_t edgeColor = selectedEdges.find(static_cast<Scene::TopologyIndex>(edgeIndex)) != selectedEdges.end()
+        const uint32_t edgeColor = selectedEdges.contains(static_cast<Scene::TopologyIndex>(edgeIndex))
                                        ? OVERLAY_COLOR_SELECTED_ABGR
                                        : OVERLAY_COLOR_DEFAULT_ABGR;
 
-        const uint16_t i0 = edge[0];
-        const uint16_t i1 = edge[1];
+        const uint16_t i0 = edge.first;
+        const uint16_t i1 = edge.second;
         if (i0 >= object.localVertices.size() || i1 >= object.localVertices.size())
         {
             continue;
@@ -287,7 +285,7 @@ void appendSelectionOverlay(Scene::BuiltMeshData &built, const Scene::BuildObjec
 
         const bx::Vec3 du = bx::mul(outwardDirection, SELECTION_EDGE_HALF_THICKNESS);
         const bx::Vec3 dv = bx::mul(sideDirection, SELECTION_EDGE_HALF_THICKNESS);
-        const uint16_t base = static_cast<uint16_t>(built.selectionOverlayEdgeVertices.size());
+        const auto base = static_cast<uint16_t>(built.selectionOverlayEdgeVertices.size());
 
         appendPrismVertex(bx::sub(bx::sub(p0Offset, du), dv), edgeColor);
         appendPrismVertex(bx::add(bx::sub(p0Offset, dv), du), edgeColor);

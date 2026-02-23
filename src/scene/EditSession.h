@@ -1,7 +1,6 @@
 #pragma once
 
 #include <optional>
-#include <vector>
 
 #include "scene/Document.h"
 #include "scene/EditCommand.h"
@@ -16,24 +15,12 @@ namespace Scene
 class EditSession
 {
 public:
-    void beginExtrude(const Document &document, float mouseY);
-    bool updateExtrude(Document &document, float mouseY);
-    std::optional<EditCommand> endExtrude(const Document &document);
     void beginTranslate(const Document &document, const MousePosition &mousePosition);
     bool updateTranslate(Document &document, float cameraYawRadians, const MousePosition &mousePosition);
     std::optional<EditCommand> endTranslate(const Document &document);
     void cancel();
 
 private:
-    struct ExtrudeDrag
-    {
-        bool active{};
-        ObjectId objectId{};
-        float previousMouseY{};
-        std::vector<uint16_t> vertexIndices;
-        std::vector<float> beforeY;
-    };
-
     struct TranslateDrag
     {
         bool active{};
@@ -43,7 +30,6 @@ private:
         float previousMouseY{};
     };
 
-    ExtrudeDrag mExtrudeDrag;
     TranslateDrag mTranslateDrag;
 };
 

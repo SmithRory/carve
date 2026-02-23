@@ -1,7 +1,7 @@
 #include "Document.h"
 
-#include <bx/math.h>
 #include <array>
+#include <bx/math.h>
 #include <cstddef>
 #include <cstdint>
 #include <ranges>
@@ -9,16 +9,6 @@
 
 namespace Scene
 {
-namespace
-{
-uint32_t edgeKey(uint16_t a, uint16_t b)
-{
-    /* Canonicalize undirected edge endpoints into a stable 32-bit lookup key. */
-    const uint16_t lo = bx::min(a, b);
-    const uint16_t hi = bx::max(a, b);
-    return (static_cast<uint32_t>(lo) << 16U) | static_cast<uint32_t>(hi);
-}
-} // namespace
 
 /**
  * Returns objects in draw-order/index order.
@@ -88,7 +78,7 @@ bool Document::addToSelection(ObjectId id)
         return false;
     }
 
-    if (mObjectIndices.find(id) == mObjectIndices.end())
+    if (!mObjectIndices.contains(id))
     {
         return false;
     }
@@ -96,12 +86,8 @@ bool Document::addToSelection(ObjectId id)
     const auto inserted = mSelectedObjectIds.insert(id);
     mPrimarySelectedObjectId = id;
     clearComponentSelection();
-    if (inserted.second)
-    {
-        return true;
-    }
 
-    return false;
+    return inserted.second;
 }
 
 /**
@@ -120,7 +106,17 @@ bool Document::isObjectSelected(ObjectId id) const
  */
 bool Document::clearSelection()
 {
-    if (mSelectedObjectIds.empty())
+    const bool hadSelectedObjects = !mSelectedObjectIds.empty();
+    const bool hadPrimarySelection = mPrimarySelectedObjectId != 0U;
+    const bool hadComponentSelection =
+        (mComponentObjectId != 0U)
+        || !mSelectedVertexIndices.empty()
+        || !mExplicitSelectedEdgeIndices.empty()
+        || !mExplicitSelectedFaceIndices.empty()
+        || !mResolvedSelectedEdgeIndices.empty()
+        || !mResolvedSelectedFaceIndices.empty();
+
+    if (!hadSelectedObjects && !hadPrimarySelection && !hadComponentSelection)
     {
         return false;
     }
@@ -128,6 +124,7 @@ bool Document::clearSelection()
     mSelectedObjectIds.clear();
     mPrimarySelectedObjectId = 0U;
     clearComponentSelection();
+
     return true;
 }
 
@@ -255,7 +252,12 @@ bool Document::selectFace(ObjectId objectId, uint16_t faceIndex, bool additiveSe
 
 bool Document::clearComponentSelection()
 {
-    if (mComponentObjectId == 0U && mSelectedVertexIndices.empty() && mExplicitSelectedEdgeIndices.empty() && mExplicitSelectedFaceIndices.empty() && mResolvedSelectedEdgeIndices.empty() && mResolvedSelectedFaceIndices.empty())
+    if (mComponentObjectId == 0U
+        && mSelectedVertexIndices.empty()
+        && mExplicitSelectedEdgeIndices.empty()
+        && mExplicitSelectedFaceIndices.empty()
+        && mResolvedSelectedEdgeIndices.empty()
+        && mResolvedSelectedFaceIndices.empty())
     {
         return false;
     }
@@ -386,7 +388,24 @@ std::optional<EditableObject> Document::removeObject(ObjectId id, std::size_t &o
     if (selectedFound != mSelectedObjectIds.end())
     {
         mSelectedObjectIds.erase(selectedFound);
-        if (mPrimarySelectedObjectId == id)
+    }
+
+    if (mPrimarySelectedObjectId == id)
+    {
+        if (mSelectedObjectIds.empty())
+        {
+            mPrimarySelectedObjectId = 0U;
+        }
+        else
+        {
+            mPrimarySelectedObjectId = *mSelectedObjectIds.begin();
+        }
+    }
+    else if (mPrimarySelectedObjectId != 0U)
+    {
+        const bool primaryExists = mObjectIndices.contains(mPrimarySelectedObjectId);
+        const bool primarySelected = mSelectedObjectIds.contains(mPrimarySelectedObjectId);
+        if (!primaryExists || !primarySelected)
         {
             if (mSelectedObjectIds.empty())
             {
@@ -415,7 +434,7 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
     for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
         const auto &edge = object.edges[edgeIndex];
-        if (mSelectedVertexIndices.find(edge[0]) != mSelectedVertexIndices.end() && mSelectedVertexIndices.find(edge[1]) != mSelectedVertexIndices.end())
+        if (mSelectedVertexIndices.contains(edge.first) && mSelectedVertexIndices.contains(edge.second))
         {
             mResolvedSelectedEdgeIndices.insert(static_cast<uint16_t>(edgeIndex));
         }
@@ -423,12 +442,12 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
 
     /* A face is treated as selected when all of its boundary edges are selected. */
     mResolvedSelectedFaceIndices = mExplicitSelectedFaceIndices;
-    std::unordered_map<uint32_t, uint16_t> edgeLookup;
+    std::unordered_map<EdgeHash, uint16_t> edgeLookup;
     edgeLookup.reserve(object.edges.size());
     for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
         const auto &edge = object.edges[edgeIndex];
-        edgeLookup[edgeKey(edge[0], edge[1])] = static_cast<uint16_t>(edgeIndex);
+        edgeLookup[edgeHash(edge.first, edge.second)] = static_cast<uint16_t>(edgeIndex);
     }
 
     for (const std::size_t faceIdx : std::views::iota(std::size_t{ 0U }, object.faces.size()))
@@ -444,8 +463,8 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
         uint16_t previousVertex = firstVertex;
         for (const uint16_t currentVertex : face | std::views::drop(1))
         {
-            const auto edgeIt = edgeLookup.find(edgeKey(previousVertex, currentVertex));
-            if (edgeIt == edgeLookup.end() || mResolvedSelectedEdgeIndices.find(edgeIt->second) == mResolvedSelectedEdgeIndices.end())
+            const auto edgeIt = edgeLookup.find(edgeHash(previousVertex, currentVertex));
+            if (edgeIt == edgeLookup.end() || !mResolvedSelectedEdgeIndices.contains(edgeIt->second))
             {
                 allEdgesSelected = false;
                 break;
@@ -455,8 +474,8 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
 
         if (allEdgesSelected)
         {
-            const auto edgeIt = edgeLookup.find(edgeKey(previousVertex, firstVertex));
-            if (edgeIt == edgeLookup.end() || mResolvedSelectedEdgeIndices.find(edgeIt->second) == mResolvedSelectedEdgeIndices.end())
+            const auto edgeIt = edgeLookup.find(edgeHash(previousVertex, firstVertex));
+            if (edgeIt == edgeLookup.end() || !mResolvedSelectedEdgeIndices.contains(edgeIt->second))
             {
                 allEdgesSelected = false;
             }
@@ -464,7 +483,7 @@ void Document::recomputeDerivedComponentSelection(const EditableObject &object)
 
         if (allEdgesSelected)
         {
-            const uint16_t faceIndex = static_cast<uint16_t>(faceIdx);
+            const auto faceIndex = static_cast<uint16_t>(faceIdx);
             mResolvedSelectedFaceIndices.insert(faceIndex);
         }
     }

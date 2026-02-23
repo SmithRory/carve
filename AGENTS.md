@@ -35,6 +35,7 @@ This file defines how agents should behave in this repository.
 - Change only what the user asked to change.
 - Keep edits minimal and focused.
 - Do not add extra helper functions unless required for the requested change.
+- Add a concise header comment for each newly added function describing purpose, inputs, and return behavior.
 - Inspect surrounding code before making edits.
 
 ## High level goals

@@ -14,8 +14,7 @@
 #include "scene/Types.h"
 #include "scene/UndoHistory.h"
 
-namespace Scene
-{
+namespace Scene {
 inline constexpr std::size_t CAMERA_MOVE_SLOT_COUNT = 4U;
 
 /**
@@ -24,8 +23,7 @@ inline constexpr std::size_t CAMERA_MOVE_SLOT_COUNT = 4U;
  * Core is the high-level scene API. It delegates document mutation, drag-edit sessions,
  * undo history, selection queries, and mesh building to dedicated scene components.
  */
-class Core
-{
+class Core {
 public:
     Core();
     void createCubeInFrontOfCamera();
@@ -39,9 +37,6 @@ public:
     bool isObjectSelected(ObjectId id) const;
     bool undo();
     bool redo();
-    void beginExtrudeEdit(float mouseY);
-    void updateExtrudeEdit(float mouseY);
-    void endExtrudeEdit();
     void beginTranslateEdit(const MousePosition &mousePosition);
     void updateTranslateEdit(const MousePosition &mousePosition);
     void endTranslateEdit();
@@ -54,16 +49,14 @@ public:
     RenderSnapshot snapshot() const;
 
 private:
-    struct CameraState
-    {
+    struct CameraState {
         bx::Vec3 position;
         float yawRadians;
         float pitchRadians;
         std::array<bool, CAMERA_MOVE_SLOT_COUNT> moveActive;
     };
 
-    struct BuildState
-    {
+    struct BuildState {
         uint64_t editRevision;
         uint64_t builtRevision;
         bool buildPending;
@@ -71,7 +64,7 @@ private:
         std::shared_ptr<const BuiltMeshData> renderMesh;
     };
 
-    EditableObject makeCubeInFrontOfCameraLocked();
+    EditableObject createDefaultCube();
 
     bool applyForwardAndMarkLocked(const EditCommand &command);
     bool applyBackwardAndMarkLocked(const EditCommand &command);

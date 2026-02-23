@@ -11,27 +11,25 @@
 
 #include "scene/Types.h"
 
-namespace Scene
-{
+namespace Scene {
+
 using ObjectId = uint64_t;
 
 /**
  * Mutable object state stored in the editor document.
  */
-struct EditableObject
-{
+struct EditableObject {
     ObjectId id{};
     bx::Vec3 position{ 0.0F, 0.0F, 0.0F };
     std::vector<bx::Vec3> localVertices;
     std::vector<Face> faces;
-    std::vector<std::array<uint16_t, 2>> edges;
+    std::vector<Edge> edges;
 };
 
 /**
  * Owns object storage, index lookup, and current selection state.
  */
-class Document
-{
+class Document {
 public:
     const std::vector<EditableObject> &objects() const;
     ObjectId selectedObjectId() const;

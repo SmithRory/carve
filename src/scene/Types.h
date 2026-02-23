@@ -1,7 +1,7 @@
 #pragma once
 
-#include <bx/math.h>
 #include <array>
+#include <bx/math.h>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -10,17 +10,24 @@
 namespace Scene
 {
 using TopologyIndex = uint16_t;
-using Edge = std::array<TopologyIndex, 2>;
+using Edge = std::pair<uint16_t, uint16_t>;
 using Face = std::vector<TopologyIndex>;
+using EdgeHash = uint32_t;
 
-struct MousePosition
+constexpr uint32_t edgeHash(uint16_t a, uint16_t b)
 {
+    /* Canonicalize undirected edge endpoints into a stable 32-bit lookup key. */
+    const uint16_t lo = bx::min(a, b);
+    const uint16_t hi = bx::max(a, b);
+    return (static_cast<uint32_t>(lo) << 16U) | static_cast<uint32_t>(hi);
+}
+
+struct MousePosition {
     float x{};
     float y{};
 };
 
-struct CameraParameters
-{
+struct CameraParameters {
     bx::Vec3 position{ 0.0F, 0.0F, 0.0F };
     float yawRadians{};
     float pitchRadians{};
@@ -29,8 +36,7 @@ struct CameraParameters
 /**
  * Packed vertex layout uploaded to bgfx dynamic buffers.
  */
-struct PackedVertex
-{
+struct PackedVertex {
     float x;
     float y;
     float z;
@@ -43,8 +49,7 @@ struct PackedVertex
 /**
  * Immutable object payload copied into a build ticket.
  */
-struct BuildObject
-{
+struct BuildObject {
     uint64_t objectId{};
     bx::Vec3 position{ 0.0F, 0.0F, 0.0F };
     std::vector<bx::Vec3> localVertices;
@@ -59,8 +64,7 @@ struct BuildObject
 /**
  * Snapshot of document state consumed by the mesh build worker.
  */
-struct BuildTicket
-{
+struct BuildTicket {
     uint64_t targetRevision{};
     std::vector<BuildObject> objects;
     bool objectSelected{};
@@ -69,8 +73,7 @@ struct BuildTicket
 /**
  * CPU-built mesh buffers tagged with the source edit revision.
  */
-struct BuiltMeshData
-{
+struct BuiltMeshData {
     uint64_t builtRevision;
     std::vector<PackedVertex> vertices;
     std::vector<uint16_t> indices;
@@ -81,8 +84,7 @@ struct BuiltMeshData
 /**
  * Thread-safe scene state consumed by the renderer each frame.
  */
-struct RenderSnapshot
-{
+struct RenderSnapshot {
     uint64_t editRevision;
     uint64_t builtRevision;
     bool upToDate;
@@ -96,8 +98,7 @@ struct RenderSnapshot
 /**
  * Camera movement directions toggled by keyboard input.
  */
-enum class CameraMove : uint8_t
-{
+enum class CameraMove : uint8_t {
     Forward,
     Backward,
     Left,

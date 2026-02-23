@@ -1,19 +1,18 @@
 #include "Core.h"
 
 #include <algorithm>
-#include <bx/math.h>
 #include <array>
+#include <bx/math.h>
 #include <optional>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
-#include "scene/CommandOps.h"
+#include "scene/Commands.h"
 #include "scene/MeshBuilder.h"
 #include "scene/Selection.h"
 
-namespace
-{
+namespace {
 constexpr float DEFAULT_CUBE_HALF_EXTENT = 0.5F;
 constexpr float CREATE_DISTANCE_FROM_CAMERA = 6.0F;
 
@@ -50,37 +49,29 @@ std::vector<bx::Vec3> makeDefaultCubeVertices(float halfExtent)
     };
 }
 
-const std::vector<Scene::Face> &defaultCubeFaces()
-{
-    static const std::vector<Scene::Face> faces = {
-        Scene::Face{ 0U, 1U, 3U, 2U }, // front
-        Scene::Face{ 5U, 4U, 6U, 7U }, // back
-        Scene::Face{ 4U, 0U, 2U, 6U }, // left
-        Scene::Face{ 1U, 5U, 7U, 3U }, // right
-        Scene::Face{ 4U, 5U, 1U, 0U }, // top
-        Scene::Face{ 2U, 3U, 7U, 6U }, // bottom
-    };
-    return faces;
-}
+static const std::vector<Scene::Face> defaultCubeFaces = {
+    Scene::Face{ 0U, 1U, 3U, 2U }, // front
+    Scene::Face{ 5U, 4U, 6U, 7U }, // back
+    Scene::Face{ 4U, 0U, 2U, 6U }, // left
+    Scene::Face{ 1U, 5U, 7U, 3U }, // right
+    Scene::Face{ 4U, 5U, 1U, 0U }, // top
+    Scene::Face{ 2U, 3U, 7U, 6U }, // bottom
+};
 
-const std::vector<std::array<uint16_t, 2>> &defaultCubeEdges()
-{
-    static const std::vector<std::array<uint16_t, 2>> edges = {
-        std::array<uint16_t, 2>{ 0U, 1U },
-        std::array<uint16_t, 2>{ 1U, 3U },
-        std::array<uint16_t, 2>{ 3U, 2U },
-        std::array<uint16_t, 2>{ 2U, 0U },
-        std::array<uint16_t, 2>{ 4U, 5U },
-        std::array<uint16_t, 2>{ 5U, 7U },
-        std::array<uint16_t, 2>{ 7U, 6U },
-        std::array<uint16_t, 2>{ 6U, 4U },
-        std::array<uint16_t, 2>{ 0U, 4U },
-        std::array<uint16_t, 2>{ 1U, 5U },
-        std::array<uint16_t, 2>{ 2U, 6U },
-        std::array<uint16_t, 2>{ 3U, 7U },
-    };
-    return edges;
-}
+static const std::vector<Scene::Edge> defaultCubeEdges = {
+    std::pair<uint16_t, uint16_t>{ 0U, 1U },
+    std::pair<uint16_t, uint16_t>{ 1U, 3U },
+    std::pair<uint16_t, uint16_t>{ 3U, 2U },
+    std::pair<uint16_t, uint16_t>{ 2U, 0U },
+    std::pair<uint16_t, uint16_t>{ 4U, 5U },
+    std::pair<uint16_t, uint16_t>{ 5U, 7U },
+    std::pair<uint16_t, uint16_t>{ 7U, 6U },
+    std::pair<uint16_t, uint16_t>{ 6U, 4U },
+    std::pair<uint16_t, uint16_t>{ 0U, 4U },
+    std::pair<uint16_t, uint16_t>{ 1U, 5U },
+    std::pair<uint16_t, uint16_t>{ 2U, 6U },
+    std::pair<uint16_t, uint16_t>{ 3U, 7U },
+};
 
 std::vector<Scene::TopologyIndex> selectionIndicesToVector(const std::unordered_set<uint16_t> &selection)
 {
@@ -95,8 +86,7 @@ std::vector<Scene::TopologyIndex> selectionIndicesToVector(const std::unordered_
 }
 } // namespace
 
-namespace Scene
-{
+namespace Scene {
 
 /**
  * Initializes high-level scene systems and default camera/build state.
@@ -125,7 +115,7 @@ Core::Core()
 void Core::createCubeInFrontOfCamera()
 {
     std::lock_guard<std::mutex> lock(mMutex);
-    const EditableObject object = makeCubeInFrontOfCameraLocked();
+    const EditableObject object = createDefaultCube();
     const EditCommand command = CreateObjectCommand{
         .object = object,
         .index = mDocument.objects().size(),
@@ -384,42 +374,6 @@ bool Core::redo()
 }
 
 /**
- * Starts extrusion drag interaction on selected object.
- * @param[in] mouseY Cursor y position in pixels.
- */
-void Core::beginExtrudeEdit(float mouseY)
-{
-    std::lock_guard<std::mutex> lock(mMutex);
-    mEditSession.beginExtrude(mDocument, mouseY);
-}
-
-/**
- * Applies one extrusion drag step.
- * @param[in] mouseY Cursor y position in pixels.
- */
-void Core::updateExtrudeEdit(float mouseY)
-{
-    std::lock_guard<std::mutex> lock(mMutex);
-    if (mEditSession.updateExtrude(mDocument, mouseY))
-    {
-        markMeshDirtyLocked();
-    }
-}
-
-/**
- * Ends extrusion drag and commits one undo command when changed.
- */
-void Core::endExtrudeEdit()
-{
-    std::lock_guard<std::mutex> lock(mMutex);
-    const std::optional<EditCommand> command = mEditSession.endExtrude(mDocument);
-    if (command.has_value())
-    {
-        recordAppliedCommandLocked(*command);
-    }
-}
-
-/**
  * Starts translation drag interaction on selected object.
  * @param[in] mousePosition Cursor position in pixels.
  */
@@ -543,17 +497,20 @@ bool Core::tryStartBuild(BuildTicket &outTicket)
 
     for (const EditableObject &object : mDocument.objects())
     {
-        outTicket.objects.push_back(BuildObject{
-            .objectId = object.id,
-            .position = object.position,
-            .localVertices = object.localVertices,
-            .faces = object.faces,
-            .edges = object.edges,
-            .selectedVertexIndices = (mDocument.componentSelectionObjectId() == object.id) ? selectionIndicesToVector(mDocument.selectedVertexIndices()) : std::vector<TopologyIndex>{},
-            .selectedEdgeIndices = (mDocument.componentSelectionObjectId() == object.id) ? selectionIndicesToVector(mDocument.selectedEdgeIndices()) : std::vector<TopologyIndex>{},
-            .selectedFaceIndices = (mDocument.componentSelectionObjectId() == object.id) ? selectionIndicesToVector(mDocument.selectedFaceIndices()) : std::vector<TopologyIndex>{},
-            .selected = mDocument.isObjectSelected(object.id),
-        });
+        if (mDocument.componentSelectionObjectId() == object.id)
+        {
+            outTicket.objects.push_back(BuildObject{
+                .objectId = object.id,
+                .position = object.position,
+                .localVertices = object.localVertices,
+                .faces = object.faces,
+                .edges = object.edges,
+                .selectedVertexIndices = std::vector<TopologyIndex>{ mDocument.selectedVertexIndices().begin(), mDocument.selectedVertexIndices().end() },
+                .selectedEdgeIndices = std::vector<TopologyIndex>{ mDocument.selectedEdgeIndices().begin(), mDocument.selectedEdgeIndices().end() },
+                .selectedFaceIndices = std::vector<TopologyIndex>{ mDocument.selectedFaceIndices().begin(), mDocument.selectedFaceIndices().end() },
+                .selected = mDocument.isObjectSelected(object.id),
+            });
+        }
     }
 
     outTicket.objectSelected = mDocument.hasSelection();
@@ -613,7 +570,7 @@ RenderSnapshot Core::snapshot() const
     };
 }
 
-EditableObject Core::makeCubeInFrontOfCameraLocked()
+EditableObject Core::createDefaultCube()
 {
     const float cosPitch = bx::cos(mCamera.pitchRadians);
     const bx::Vec3 forward(
@@ -627,14 +584,14 @@ EditableObject Core::makeCubeInFrontOfCameraLocked()
         .id = mNextObjectId++,
         .position = bx::Vec3{ center.x, 0.0F, center.z },
         .localVertices = makeDefaultCubeVertices(DEFAULT_CUBE_HALF_EXTENT),
-        .faces = defaultCubeFaces(),
-        .edges = defaultCubeEdges(),
+        .faces = defaultCubeFaces,
+        .edges = defaultCubeEdges,
     };
 }
 
 bool Core::applyForwardAndMarkLocked(const EditCommand &command)
 {
-    const bool changed = applyCommandForward(mDocument, command);
+    const bool changed = applyCommand(mDocument, command);
     if (changed)
     {
         markMeshDirtyLocked();
@@ -645,7 +602,7 @@ bool Core::applyForwardAndMarkLocked(const EditCommand &command)
 
 bool Core::applyBackwardAndMarkLocked(const EditCommand &command)
 {
-    const bool changed = applyCommandBackward(mDocument, command);
+    const bool changed = undoCommand(mDocument, command);
     if (changed)
     {
         markMeshDirtyLocked();

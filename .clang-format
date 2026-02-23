@@ -8,8 +8,15 @@ BinPackParameters: false
 BinPackArguments: false
 AllowAllParametersOfDeclarationOnNextLine: false
 AllowAllArgumentsOnNextLine: false
-BreakBeforeBraces: Allman
+BreakBeforeBraces: Custom
+BraceWrapping:
+    AfterFunction: true
+    BeforeLambdaBody: false
+    AfterControlStatement: Always
+    BeforeElse: true
+    AfterNamespace: true
 BreakBeforeBinaryOperators: NonAssignment
 Cpp11BracedListStyle: false
-LambdaBodyIndentation: OuterScope
+AllowShortLambdasOnASingleLine: All
+LambdaBodyIndentation: Signature
 AccessModifierOffset: -4

@@ -1,5 +1,6 @@
 #include "Selection.h"
 #include "scene/TopologyUtils.h"
+#include "scene/Types.h"
 
 #include <array>
 #include <bx/math.h>
@@ -17,13 +18,6 @@ constexpr float CAMERA_FOV_DEGREES = 60.0F;
 constexpr float INTERSECTION_EPSILON = 0.000001F;
 constexpr float VERTEX_PICK_RADIUS_PIXELS = 18.0F;
 constexpr float EDGE_PICK_RADIUS_PIXELS = 16.0F;
-
-uint32_t edgeKey(uint16_t a, uint16_t b)
-{
-    const uint16_t lo = bx::min(a, b);
-    const uint16_t hi = bx::max(a, b);
-    return (static_cast<uint32_t>(lo) << 16U) | static_cast<uint32_t>(hi);
-}
 
 bool intersectRayAabb(const bx::Vec3 &origin, const bx::Vec3 &direction, const bx::Vec3 &minBounds, const bx::Vec3 &maxBounds, float &outT)
 {
@@ -154,8 +148,7 @@ bool intersectRayTriangle(
     return true;
 }
 
-struct PickContext
-{
+struct PickContext {
     bx::Vec3 cameraPosition{ 0.0F, 0.0F, 0.0F };
     bx::Vec3 forward{ 0.0F, 0.0F, 0.0F };
     bx::Vec3 right{ 0.0F, 0.0F, 0.0F };
@@ -165,15 +158,13 @@ struct PickContext
     float viewportHeight{};
 };
 
-struct TriangleHit
-{
+struct TriangleHit {
     uint16_t faceIndex{};
     float t{};
     std::array<uint16_t, 3> triangleVertexIndices{ 0U, 0U, 0U };
 };
 
-struct EdgeCandidate
-{
+struct EdgeCandidate {
     uint16_t index{};
     const Scene::Edge *edge{};
 };
@@ -247,8 +238,7 @@ std::optional<TriangleHit> findNearestTriangleHit(const Scene::EditableObject &o
     for (const std::size_t faceIndex : std::views::iota(std::size_t{ 0U }, object.faces.size()))
     {
         const Scene::Face &face = object.faces[faceIndex];
-        Scene::forEachFaceTriangle(face, [&](const std::array<Scene::TopologyIndex, 3> &triangle)
-        {
+        Scene::forEachFaceTriangle(face, [&](const std::array<Scene::TopologyIndex, 3> &triangle) {
             const auto [i0, i1, i2] = triangle;
             if (i0 >= object.localVertices.size()
                 || i1 >= object.localVertices.size()
@@ -284,7 +274,7 @@ std::optional<TriangleHit> findNearestTriangleHit(const Scene::EditableObject &o
 
 std::unordered_map<uint32_t, uint16_t> buildEdgeLookup(const Scene::EditableObject &object)
 {
-    std::unordered_map<uint32_t, uint16_t> edgeLookup;
+    std::unordered_map<Scene::EdgeHash, uint16_t> edgeLookup;
     edgeLookup.reserve(object.edges.size());
     for (const std::size_t edgeIndex : std::views::iota(std::size_t{ 0U }, object.edges.size()))
     {
@@ -293,9 +283,9 @@ std::unordered_map<uint32_t, uint16_t> buildEdgeLookup(const Scene::EditableObje
             break;
         }
 
-        const uint16_t e0 = object.edges[edgeIndex][0];
-        const uint16_t e1 = object.edges[edgeIndex][1];
-        edgeLookup[edgeKey(e0, e1)] = static_cast<uint16_t>(edgeIndex);
+        const uint16_t e0 = object.edges[edgeIndex].first;
+        const uint16_t e1 = object.edges[edgeIndex].second;
+        edgeLookup[Scene::edgeHash(e0, e1)] = static_cast<uint16_t>(edgeIndex);
     }
 
     return edgeLookup;
@@ -303,7 +293,7 @@ std::unordered_map<uint32_t, uint16_t> buildEdgeLookup(const Scene::EditableObje
 
 std::optional<uint16_t> findEdgeIndexForVertices(const std::unordered_map<uint32_t, uint16_t> &edgeLookup, uint16_t a, uint16_t b)
 {
-    const auto found = edgeLookup.find(edgeKey(a, b));
+    const auto found = edgeLookup.find(Scene::edgeHash(a, b));
     if (found == edgeLookup.end())
     {
         return std::nullopt;
@@ -363,8 +353,7 @@ std::optional<uint16_t> pickNearestVertex(const Scene::EditableObject &object, s
     std::optional<std::pair<float, uint16_t>> bestVertex;
     const float pickRadiusSq = VERTEX_PICK_RADIUS_PIXELS * VERTEX_PICK_RADIUS_PIXELS;
 
-    const auto evaluateVertex = [&](uint16_t vertexIndex)
-    {
+    const auto evaluateVertex = [&](uint16_t vertexIndex) {
         float sx = 0.0F;
         float sy = 0.0F;
         if (!projectVertexToScreen(object, vertexIndex, pickContext, sx, sy))
@@ -404,8 +393,7 @@ std::optional<uint16_t> pickNearestEdge(const Scene::EditableObject &object, std
     std::optional<std::pair<float, uint16_t>> bestEdge;
     const float pickRadiusSq = EDGE_PICK_RADIUS_PIXELS * EDGE_PICK_RADIUS_PIXELS;
 
-    const auto evaluateEdge = [&](const EdgeCandidate &candidate)
-    {
+    const auto evaluateEdge = [&](const EdgeCandidate &candidate) {
         if (candidate.edge == nullptr)
         {
             return;
